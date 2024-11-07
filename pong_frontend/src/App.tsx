@@ -1,6 +1,7 @@
 import "./App.css";
-import PongGame from "./components/PongGame";
+import PongLocalMult from "./components/PongLocalMult";
 import { BrowserRouter as Router, Routes, Route, Link } from "react-router-dom";
+import PongSingle from "./components/PongSingle";
 
 function App() {
   const padding = {
@@ -16,15 +17,23 @@ function App() {
         <Link style={padding} to="/chat">
           Chat
         </Link>
-        <Link style={padding} to="/game">
-          Game
+        <Link style={padding} to="/game-singleplayer">
+          Game (Singleplayer)
+        </Link>
+        <Link style={padding} to="/game-local-mult">
+          Game (Local Multiplayer)
         </Link>
       </div>
       <Routes>
         <Route
           index
-          path="/"
-          element={<PongGame gameWidth={800} gameHeight={600} />}
+          path="/game-local-mult"
+          element={<PongLocalMult gameWidth={800} gameHeight={600} />}
+        />
+        <Route
+          index
+          path="/game-singleplayer"
+          element={<PongSingle gameWidth={800} gameHeight={600} />}
         />
       </Routes>
     </Router>
