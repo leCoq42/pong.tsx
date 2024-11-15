@@ -1,30 +1,31 @@
 import { Injectable } from '@nestjs/common';
 import { CreateGameFields, RejoinGameFields, JoinGameFields } from './types';
-import { createGameID, createUserID } from 'src/ids';
+import { createGameID } from 'src/ids';
 
 @Injectable()
 export class GameService {
+  private gameMap: Map<string, any> = new Map();
+
   async createGame(fields: CreateGameFields) {
     const gameID = createGameID();
-    const userID = createUserID();
 
     return {
       ...fields,
-      userId: userID,
       gameId: gameID,
     };
   }
 
   async joinGame(fields: JoinGameFields) {
-    const userId = createUserID();
-
     return {
       ...fields,
-      userId,
     };
   }
 
   async rejoinGame(fields: RejoinGameFields) {
-    return fields;
+    return { ...fields };
+  }
+
+  async getCurrentMatches() {
+    return this.gameMap;
   }
 }

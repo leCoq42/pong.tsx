@@ -1,10 +1,16 @@
-import { Body, Controller, Post, Logger } from '@nestjs/common';
+import { Body, Controller, Get, Post, Logger } from '@nestjs/common';
 import { GameService } from './game.service';
 import { CreateGameFields, JoinGameFields } from './types';
 
-@Controller('game')
+@Controller('/game')
 export class GameController {
   constructor(private gameService: GameService) {}
+
+  @Get()
+  async getRooms() {
+    const result = await this.gameService.getCurrentMatches();
+    return result;
+  }
 
   @Post()
   async createGame(@Body() createInfo: CreateGameFields) {
@@ -24,9 +30,7 @@ export class GameController {
   async rejoinGame() {
     Logger.log('In rejoin');
     const result = await this.gameService.rejoinGame({
-      name: 'From token',
-      gameID: 'Also grom token',
-      userID: 'guess where?',
+      gameID: 'from token',
     });
     return result;
   }
