@@ -1,7 +1,8 @@
 import "./App.css";
-import PongLocalMult from "./components/PongLocalMult";
 import { BrowserRouter as Router, Routes, Route, Link } from "react-router-dom";
+import PongLocalMult from "./components/PongLocalMult";
 import PongSingle from "./components/PongSingle";
+import PingServer from "./components/Ping";
 
 function App() {
   const padding = {
@@ -25,6 +26,7 @@ function App() {
         </Link>
       </div>
       <Routes>
+        <Route index path="/" element={<PingServer />} />
         <Route
           index
           path="/game-local-mult"

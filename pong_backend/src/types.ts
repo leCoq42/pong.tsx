@@ -6,9 +6,5 @@ export interface GameState {
   paddle1Y: number;
   paddle2Y: number;
   score1: number;
-  score2: number
-
-export interface gameProps {
-  gameWidth: number;
-  gameHeight: number;
+  score2: number;
 }
