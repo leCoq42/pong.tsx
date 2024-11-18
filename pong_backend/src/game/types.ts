@@ -1,13 +1,11 @@
-export type CreateGameFields = {
-  name: string;
-  playerId: string;
-  opponentId?: string;
-};
+import { Socket } from 'socket.io';
+import { ServerEvents } from '../../../shared/game-types';
+import { Lobby } from './lobby/lobby';
 
-export type JoinGameFields = {
-  gameID: string;
-};
+export type AuthenticatedSocket = Socket & {
+  data: {
+    lobby: null | Lobby;
+  };
 
-export type RejoinGameFields = {
-  gameID: string;
+  emite: <T>(ev: ServerEvents, data: T) => boolean;
 };

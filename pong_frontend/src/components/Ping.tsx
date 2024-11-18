@@ -1,11 +1,11 @@
 import { io } from "socket.io-client";
 
-const socket = io("http://localhost:3000");
-
 const PingServer = () => {
-  socket.emit("ping", () => {
-    console.log("ping");
-  });
+  const socket = io("http://localhost:3000");
+
+  const onPing = () => {
+    socket.emit("ping");
+  };
 
   socket.on("pong", () => {
     console.log("pong");
@@ -15,7 +15,11 @@ const PingServer = () => {
     console.log("received message");
   });
 
-  return <div>Pinged the server!</div>;
+  return (
+    <div>
+      <button onClick={onPing}>ping</button>
+    </div>
+  );
 };
 
 export default PingServer;
