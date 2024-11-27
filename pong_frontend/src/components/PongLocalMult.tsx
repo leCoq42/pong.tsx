@@ -16,8 +16,9 @@ const PongLocalMult = (props: gameProps) => {
   const gameStateRef = useRef<GameState>({
     ballX: 400,
     ballY: 300,
-    ballSpeedX: Math.random() > 0.5 ? BALL_SPEED : -BALL_SPEED,
-    ballSpeedY: Math.random() > 0.5 ? BALL_SPEED : -BALL_SPEED,
+    ballDirX: Math.random() > 0.5 ? 1 : -1,
+    ballDirY: Math.random() > 0.5 ? 1 : -1,
+    ballSpeed: BALL_SPEED,
     paddle1Y: 250,
     paddle2Y: 250,
     score1: 0,
@@ -35,14 +36,15 @@ const PongLocalMult = (props: gameProps) => {
   const handleRematch = useCallback(() => {
     // const newBallSpeedX =
     //   gameStateRef.current.ballSpeedX > 0 ? -BALL_SPEED : BALL_SPEED;
-    const newBallSpeedX = Math.random() > 0.5 ? BALL_SPEED : -BALL_SPEED;
-    const newBallSpeedY = Math.random() > 0.5 ? BALL_SPEED : -BALL_SPEED;
+    const newBallDirX = Math.random() > 0.5 ? 1 : -1;
+    const newBallDirY = Math.random() > 0.5 ? 1 : -1;
 
     gameStateRef.current = {
       ballX: 400,
       ballY: 300,
-      ballSpeedX: newBallSpeedX,
-      ballSpeedY: newBallSpeedY,
+      ballDirX: newBallDirX,
+      ballDirY: newBallDirY,
+      ballSpeed: BALL_SPEED,
       paddle1Y: 250,
       paddle2Y: 250,
       score1: 0,
@@ -125,15 +127,17 @@ const PongLocalMult = (props: gameProps) => {
         canvas,
       );
 
-      let newBallX = gameState.ballX + gameState.ballSpeedX;
-      let newBallY = gameState.ballY + gameState.ballSpeedY;
-      let newBallSpeedX = gameState.ballSpeedX;
-      let newBallSpeedY = gameState.ballSpeedY;
+      let newBallX = gameState.ballX + gameState.ballSpeed * gameState.ballDirX;
+      let newBallY = gameState.ballY + gameState.ballSpeed * gameState.ballDirY;
+      let newBallDirX = gameState.ballDirX;
+      let newBallDirY = gameState.ballDirY;
+      let newBallSpeed = gameState.ballSpeed;
       let newScore1 = gameState.score1;
       let newScore2 = gameState.score2;
 
       if (newBallY <= 0 || newBallY >= canvas.height - BALL_SIZE) {
-        newBallSpeedY = -newBallSpeedY * BALL_ACCELERATION;
+        newBallDirY = -newBallDirY;
+        newBallSpeed = newBallSpeed * BALL_ACCELERATION;
       }
 
       // Paddle collision Player1
@@ -142,7 +146,8 @@ const PongLocalMult = (props: gameProps) => {
         newBallY >= gameState.paddle1Y &&
         newBallY <= gameState.paddle1Y + PADDLE_HEIGHT
       ) {
-        newBallSpeedX = -newBallSpeedX * BALL_ACCELERATION;
+        newBallDirX = -newBallDirX;
+        newBallSpeed = newBallSpeed * BALL_ACCELERATION;
       }
       // Paddle collision Player2
       if (
@@ -150,7 +155,8 @@ const PongLocalMult = (props: gameProps) => {
         newBallY >= gameState.paddle2Y &&
         newBallY <= gameState.paddle2Y + PADDLE_HEIGHT
       ) {
-        newBallSpeedX = -newBallSpeedX * BALL_ACCELERATION;
+        newBallDirX = -newBallDirX;
+        newBallSpeed = newBallSpeed * BALL_ACCELERATION;
       }
 
       //Register Score Player 1
@@ -158,16 +164,18 @@ const PongLocalMult = (props: gameProps) => {
         newScore1++;
         newBallX = canvas.width / 2;
         newBallY = canvas.height / 2;
-        newBallSpeedX = -BALL_SPEED;
-        newBallSpeedY = -BALL_SPEED;
+        newBallDirX = -newBallDirX;
+        newBallDirY = -newBallDirY;
+        newBallSpeed = BALL_SPEED;
       }
       //Register Score Player 2
       if (newBallX <= 0 - BALL_SIZE) {
         newScore2++;
         newBallX = canvas.width / 2;
         newBallY = canvas.height / 2;
-        newBallSpeedX = -BALL_SPEED;
-        newBallSpeedY = -BALL_SPEED;
+        newBallDirX = -newBallDirX;
+        newBallDirY = -newBallDirY;
+        newBallSpeed = BALL_SPEED;
       }
 
       // Register winner
@@ -183,8 +191,9 @@ const PongLocalMult = (props: gameProps) => {
         ...gameState,
         ballX: newBallX,
         ballY: newBallY,
-        ballSpeedX: newBallSpeedX,
-        ballSpeedY: newBallSpeedY,
+        ballDirX: newBallDirX,
+        ballDirY: newBallDirY,
+        ballSpeed: newBallSpeed,
         score1: newScore1,
         score2: newScore2,
       };

@@ -8,17 +8,17 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   const configService = app.get(ConfigService);
-  const port = parseInt(configService.get('PORT'));
-  const frontendPort = parseInt(configService.get('FRONT_PORT'));
+  const port = configService.get('PORT');
+  const frontendPort = configService.get('FRONT_PORT');
 
   app.enableCors({
     origin: [
       `http://localhost:${frontendPort}`,
-      new RegExp(`/^http:\/\/192\.168\.1\.([1-9]|[1-9]\d):${frontendPort}$/`),
+      // new RegExp(`/^http:\/\/192\.168\.1\.([1-9]|[1-9]\d):${frontendPort}$/`),
     ],
   });
 
   await app.listen(port);
-  logger.log(`Server running on port ${port}`);
+  logger.log(`Server running on port ${await app.getUrl()}`);
 }
 bootstrap();

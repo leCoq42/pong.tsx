@@ -2,37 +2,36 @@ import {
   WebSocketGateway,
   SubscribeMessage,
   MessageBody,
+  WebSocketServer,
+  WsResponse,
 } from '@nestjs/websockets';
 import { PongService } from './pong.service';
-import { CreatePongDto } from './dto/create-pong.dto';
-import { UpdatePongDto } from './dto/update-pong.dto';
+// import { CreatePongDto } from './dto/create-pong.dto';
+// import { UpdatePongDto } from './dto/update-pong.dto';
+import { from, Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
+import { Server } from 'socket.io';
 
-@WebSocketGateway()
+@WebSocketGateway({
+  cors: {
+    origin: '*',
+  },
+})
 export class PongGateway {
+  @WebSocketServer()
+  server: Server;
+
   constructor(private readonly pongService: PongService) {}
 
-  @SubscribeMessage('createPong')
-  create(@MessageBody() createPongDto: CreatePongDto) {
-    return this.pongService.create(createPongDto);
+  @SubscribeMessage('events')
+  findAll(@MessageBody() data: any): Observable<WsResponse<number>> {
+    return from([1, 2, 3]).pipe(
+      map((item) => ({ event: 'events', data: item })),
+    );
   }
 
-  @SubscribeMessage('findAllPong')
-  findAll() {
-    return this.pongService.findAll();
-  }
-
-  @SubscribeMessage('findOnePong')
-  findOne(@MessageBody() id: number) {
-    return this.pongService.findOne(id);
-  }
-
-  @SubscribeMessage('updatePong')
-  update(@MessageBody() updatePongDto: UpdatePongDto) {
-    return this.pongService.update(updatePongDto.id, updatePongDto);
-  }
-
-  @SubscribeMessage('removePong')
-  remove(@MessageBody() id: number) {
-    return this.pongService.remove(id);
+  @SubscribeMessage('identity')
+  async identity(@MessageBody() data: number): Promise<number> {
+    return data;
   }
 }

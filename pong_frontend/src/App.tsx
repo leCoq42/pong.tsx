@@ -1,44 +1,34 @@
 import "./App.css";
-import { BrowserRouter as Router, Routes, Route, Link } from "react-router-dom";
+import { Routes, Route } from "react-router-dom";
+import PongLanding from "./components/PongLanding";
+import PongRemoteMP from "./components/PongRemoteMP";
 import PongLocalMult from "./components/PongLocalMult";
 import PongSingle from "./components/PongSingle";
-import PingServer from "./components/Ping";
+import NavBar from "./components/NavBar";
 
 function App() {
-  const padding = {
-    padding: 5,
-  };
-
   return (
-    <Router>
-      <div>
-        <Link style={padding} to="/">
-          Home
-        </Link>
-        <Link style={padding} to="/chat">
-          Chat
-        </Link>
-        <Link style={padding} to="/game-singleplayer">
-          Game (Singleplayer)
-        </Link>
-        <Link style={padding} to="/game-local-mult">
-          Game (Local Multiplayer)
-        </Link>
-      </div>
+    <>
+      <NavBar />
       <Routes>
-        <Route index path="/" element={<PingServer />} />
-        <Route
-          index
-          path="/game-local-mult"
-          element={<PongLocalMult gameWidth={800} gameHeight={600} />}
-        />
-        <Route
-          index
-          path="/game-singleplayer"
-          element={<PongSingle gameWidth={800} gameHeight={600} />}
-        />
+        <Route index path="/" element={<PongRemoteMP />} />
+        <Route path="game" element={<PongLanding />}>
+          <Route
+            path="local-mp"
+            element={<PongLocalMult gameWidth={800} gameHeight={600} />}
+          />
+          <Route
+            path="remote-mp"
+            element={<PongRemoteMP gameWidth={800} gameHeight={600} />}
+          />
+          <Route
+            path="singleplayer"
+            element={<PongSingle gameWidth={800} gameHeight={600} />}
+          />
+          <Route path="*" element={<PongRemoteMP />} />
+        </Route>
       </Routes>
-    </Router>
+    </>
   );
 }
 

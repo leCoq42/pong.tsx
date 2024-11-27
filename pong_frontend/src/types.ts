@@ -1,8 +1,9 @@
 export interface GameState {
   ballX: number;
   ballY: number;
-  ballSpeedX: number;
-  ballSpeedY: number;
+  ballDirX: number;
+  ballDirY: number;
+	ballSpeed: number;
   paddle1Y: number;
   paddle2Y: number;
   score1: number;
