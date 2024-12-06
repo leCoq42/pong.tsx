@@ -1,20 +1,3 @@
-export interface GameState {
-  ballX: number;
-  ballY: number;
-  ballSpeed: number;
-  playerSpeed: number;
-  paddle1Y: number;
-  paddle2Y: number;
-  score1: number;
-  score2: number;
-}
-
-export interface Player {
-  userID: string;
-  paddle: number;
-  // client: Socket | null;
-}
-
 export interface Room {
   players: Player[];
   roomID: string;
@@ -42,3 +25,26 @@ export type ServerPayloads = {
     color?: "red" | "blue" | "green" | "orange";
   };
 };
+
+export interface Player {
+  id: string;
+  position: number;
+  score: number;
+}
+
+export interface Ball {
+  x: number;
+  y: number;
+  dirX: number;
+  dirY: number;
+  speed: number;
+}
+
+export interface GameState {
+  ball: Ball;
+  players: Player[];
+  mode: "singleplayer" | "multiplayer";
+  isActive: boolean;
+  score1: number;
+  score2: number;
+}

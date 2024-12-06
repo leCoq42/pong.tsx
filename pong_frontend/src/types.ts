@@ -1,14 +1,3 @@
-export interface GameState {
-  ballX: number;
-  ballY: number;
-  ballDirX: number;
-  ballDirY: number;
-	ballSpeed: number;
-  paddle1Y: number;
-  paddle2Y: number;
-  score1: number;
-  score2: number
-
 export interface gameProps {
   gameWidth: number;
   gameHeight: number;
