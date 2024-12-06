@@ -8,7 +8,7 @@ import {
 // import { CreatePongDto } from './dto/create-pong.dto';
 // import { UpdatePongDto } from './dto/update-pong.dto';
 import { of, Observable } from 'rxjs';
-import { Server } from 'socket.io';
+import { Socket, Server } from 'socket.io';
 
 @WebSocketGateway({
   cors: {

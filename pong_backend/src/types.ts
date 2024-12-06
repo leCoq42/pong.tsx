@@ -10,4 +10,6 @@ export default interface GameState {
   isActive: boolean;
   score1: number;
   score2: number;
+  gameId: string;
+  mode: 'singleplayer' | 'multiplayer';
 }

@@ -3,7 +3,7 @@ import { gameProps, GameState } from "../types";
 
 const PADDLE_HEIGHT = 100;
 const PADDLE_WIDTH = 10;
-const BALL_SIZE = 10;
+const BALL_SIZE = 50;
 const BALL_SPEED = 5;
 const BALL_ACCELERATION = 1.1;
 const PADDLE_SPEED = 10;
@@ -143,7 +143,7 @@ const PongLocalMult = (props: gameProps) => {
       // Paddle collision Player1
       if (
         newBallX <= PADDLE_WIDTH &&
-        newBallY >= gameState.paddle1Y &&
+        newBallY + BALL_SIZE >= gameState.paddle1Y &&
         newBallY <= gameState.paddle1Y + PADDLE_HEIGHT
       ) {
         newBallDirX = -newBallDirX;
@@ -152,7 +152,7 @@ const PongLocalMult = (props: gameProps) => {
       // Paddle collision Player2
       if (
         newBallX >= canvas.width - PADDLE_WIDTH - BALL_SIZE &&
-        newBallY >= gameState.paddle2Y &&
+        newBallY + BALL_SIZE >= gameState.paddle2Y &&
         newBallY <= gameState.paddle2Y + PADDLE_HEIGHT
       ) {
         newBallDirX = -newBallDirX;
@@ -160,7 +160,7 @@ const PongLocalMult = (props: gameProps) => {
       }
 
       //Register Score Player 1
-      if (newBallX >= canvas.width) {
+      if (newBallX >= canvas.width - BALL_SIZE) {
         newScore1++;
         newBallX = canvas.width / 2;
         newBallY = canvas.height / 2;
@@ -169,7 +169,7 @@ const PongLocalMult = (props: gameProps) => {
         newBallSpeed = BALL_SPEED;
       }
       //Register Score Player 2
-      if (newBallX <= 0 - BALL_SIZE) {
+      if (newBallX <= 0) {
         newScore2++;
         newBallX = canvas.width / 2;
         newBallY = canvas.height / 2;

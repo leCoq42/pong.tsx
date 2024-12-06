@@ -9,11 +9,23 @@ const PongRemoteMP = (props: gameProps) => {
   const [gameStarted, setGameStarted] = useState(false);
   const [gameOver, setGameOver] = useState(false);
   const [winner, setWinner] = useState<string | null>(null);
+  const [gameMode, setGameMode] = useState<string>("");
 
   useEffect(() => {
     socketRef.current = io("http://localhost:3000/game");
 
+    socketRef.current.on("connect", () => {
+      console.log("Connected to server");
+    });
+
+    socketRef.current.on("gameStarted", ({ gameId, mode }) => {
+      console.log("Game started:", gameId, mode);
+      setGameStarted(true);
+      setGameMode(mode);
+    });
+
     socketRef.current.on("gameState", (gameState) => {
+      console.log("Received game state: ", gameState);
       updateCanvas(gameState);
     });
 
@@ -26,6 +38,12 @@ const PongRemoteMP = (props: gameProps) => {
       socketRef.current?.disconnect();
     };
   }, []);
+
+  const handleStartGame = () => {
+    console.log("Joining queue");
+    socketRef.current?.emit("joinQueue");
+    setGameStarted(true);
+  };
 
   const updateCanvas = (gameState: GameState) => {
     const canvas = canvasRef.current;
@@ -58,31 +76,40 @@ const PongRemoteMP = (props: gameProps) => {
     ctx.fillText(gameState.score2.toString(), (props.gameWidth * 3) / 4, 30);
   };
 
-  const handleStartGame = () => {
-    socketRef.current?.emit("joinGame");
-    setGameStarted(true);
-  };
-
   const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-      const newPosition = e.key === "ArrowUp" ? -10 : 10;
-      socketRef.current?.emit("updatePosition", { position: newPosition });
+    if (!gameStarted) return;
+
+    if (e.key === "ArrowUp") {
+      socketRef.current?.emit("updatePosition", "up");
+    } else if (e.key === "ArrowDown") {
+      socketRef.current?.emit("updatePosition", "down");
     }
   };
+
+  // const handleKeyUp = (e: KeyboardEvent) => {
+  //   if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+  //     socketRef.current?.emit("stopPaddle");
+  //   }
+  // };
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [gameStarted, handleKeyDown]);
 
   return (
     <div>
       {!gameStarted && <button onClick={handleStartGame}>Start Game</button>}
-      <canvas
-        ref={canvasRef}
-        width={props.gameWidth}
-        height={props.gameHeight}
-      />
+      {gameStarted && (
+        <div>
+          <div> Game Mode: {gameMode} </div>
+          <canvas
+            ref={canvasRef}
+            width={props.gameWidth}
+            height={props.gameHeight}
+          />
+        </div>
+      )}
       {gameOver && (
         <div>
           <h2>{winner} wins!</h2>

@@ -26,6 +26,15 @@ export type ServerPayloads = {
   };
 };
 
+export interface Room {
+  id: string;
+  players: Player[];
+  mode: "singleplayer" | "multiplayer";
+  isActive: boolean;
+  isFinished: boolean;
+  gameState: GameState;
+}
+
 export interface Player {
   id: string;
   position: number;
@@ -42,9 +51,9 @@ export interface Ball {
 
 export interface GameState {
   ball: Ball;
-  players: Player[];
-  mode: "singleplayer" | "multiplayer";
   isActive: boolean;
   score1: number;
   score2: number;
+  paddle1Y: number;
+  paddle2Y: number;
 }

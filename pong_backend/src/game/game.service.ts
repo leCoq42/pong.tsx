@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { v4 as uuid } from 'uuid';
-import { Player, GameState } from '../../../shared/types';
+import { GameState } from '../../../shared/types';
 
 @Injectable()
 export class GameService {
@@ -13,7 +13,7 @@ export class GameService {
     PADDLE_HEIGHT: 100,
     PADDLE_WIDTH: 10,
     BALL_SIZE: 10,
-    BALL_SPEED: 5,
+    BALL_SPEED: 1,
     BALL_ACCELERATION: 1.1,
     PADDLE_SPEED: 10,
     CANVAS_WIDTH: 800,
@@ -21,7 +21,7 @@ export class GameService {
     WIN_SCORE: 3,
   };
 
-  createGame(players: string[]): string {
+  createGame(players: string[], mode: 'singleplayer' | 'multiplayer'): string {
     const gameId = uuid();
     const gameState = this.createInitialGameState();
 
@@ -33,9 +33,17 @@ export class GameService {
         score: 0,
       })),
       isActive: true,
+      mode: mode,
     });
 
+    players.forEach((playerId) => {
+      this.playerGameMap.set(playerId, gameId);
+    });
     return gameId;
+  }
+
+  getGameIdByPlayerId(playerId: string): string | undefined {
+    return this.playerGameMap.get(playerId);
   }
 
   private createInitialGameState(): GameState {
@@ -51,6 +59,7 @@ export class GameService {
       score1: 0,
       score2: 0,
       isActive: false,
+      mode: 'singleplayer',
     };
   }
 
@@ -176,7 +185,7 @@ export class GameService {
         this.stopGameLoop(gameId);
         return;
       }
-      this.updateGameState(gameState);
+      this.updateGameState(gameId);
     }, 1000 / this.GAME_CONSTANTS.FRAME_RATE);
     this.gameLoops.set(gameId, interval);
   }

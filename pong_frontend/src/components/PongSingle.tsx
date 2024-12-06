@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { gameProps, GameState } from "../types";
+import { gameProps } from "../types";
+import { GameState } from "../../../shared/types";
 
 const PADDLE_HEIGHT = 100;
 const PADDLE_MID = PADDLE_HEIGHT / 2;
 const PADDLE_WIDTH = 10;
-const BALL_SIZE = 10;
-const BALL_SPEED = 5;
+const BALL_SIZE = 50;
+const BALL_SPEED = 3;
 const BALL_ACCELERATION = 1.1;
 const PADDLE_SPEED = 10;
 const INTERVAL = 1000 / 60;
@@ -15,14 +16,18 @@ const PongSingle = (props: gameProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const keyRef = useRef<{ [key: string]: boolean }>({});
   const gameStateRef = useRef<GameState>({
-    ballX: props.gameWidth / 2,
-    ballY: props.gameHeight / 2,
-    ballSpeedX: Math.random() > 0.5 ? BALL_SPEED : -BALL_SPEED,
-    ballSpeedY: Math.random() > 0.5 ? BALL_SPEED : -BALL_SPEED,
+    ball: {
+      x: props.gameWidth / 2,
+      y: props.gameHeight / 2,
+      dirX: Math.random() > 0.5 ? 1 : -1,
+      dirY: Math.random() > 0.5 ? 1 : -1,
+      speed: BALL_SPEED,
+    },
     paddle1Y: props.gameHeight / 2 - PADDLE_MID,
     paddle2Y: props.gameHeight / 2 - PADDLE_MID,
     score1: 0,
     score2: 0,
+    isActive: true,
   });
 
   const [gameStart, setGameStart] = useState(false);
@@ -34,24 +39,23 @@ const PongSingle = (props: gameProps) => {
   }, []);
 
   const handleRematch = useCallback(() => {
-    // const newBallSpeedX = Math.random() > 0.5 ? BALL_SPEED : -BALL_SPEED;
-    const newBallSpeedX =
-      gameStateRef.current.ballSpeedX > 0 ? -BALL_SPEED : BALL_SPEED;
-    const newBallSpeedY = Math.random() > 0.5 ? BALL_SPEED : -BALL_SPEED;
-
     gameStateRef.current = {
-      ballX: 400,
-      ballY: 300,
-      ballSpeedX: newBallSpeedX,
-      ballSpeedY: newBallSpeedY,
-      paddle1Y: 250,
-      paddle2Y: 250,
+      ball: {
+        x: props.gameWidth / 2,
+        y: props.gameHeight / 2,
+        dirX: Math.random() > 0.5 ? 1 : -1,
+        dirY: Math.random() > 0.5 ? 1 : -1,
+        speed: BALL_SPEED,
+      },
+      paddle1Y: gameStateRef.current.paddle1Y,
+      paddle2Y: gameStateRef.current.paddle2Y,
       score1: 0,
       score2: 0,
+      isActive: true,
     };
     setGameOver(false);
     setWinner(null);
-  }, []);
+  }, [props.gameHeight, props.gameWidth]);
 
   const movePlayerPaddle = useCallback(
     (
@@ -142,54 +146,58 @@ const PongSingle = (props: gameProps) => {
 
       moveAiPaddle(
         gameState.paddle2Y,
-        gameState.ballY,
+        gameState.ball.y,
         (y) => (gameState.paddle2Y = y),
         canvas,
       );
 
-      let newBallX = gameState.ballX + gameState.ballSpeedX;
-      let newBallY = gameState.ballY + gameState.ballSpeedY;
-      let newBallSpeedX = gameState.ballSpeedX;
-      let newBallSpeedY = gameState.ballSpeedY;
+      let newBallX =
+        gameState.ball.x + gameState.ball.speed * gameState.ball.dirX;
+      let newBallY =
+        gameState.ball.y + gameState.ball.speed * gameState.ball.dirY;
+      let newBallDirX = gameState.ball.dirX;
+      let newBallDirY = gameState.ball.dirY;
+      let newBallSpeed = gameState.ball.speed;
       let newScore1 = gameState.score1;
       let newScore2 = gameState.score2;
 
       if (newBallY <= 0 || newBallY >= canvas.height - BALL_SIZE) {
-        newBallSpeedY = -newBallSpeedY * BALL_ACCELERATION;
+        newBallSpeed = newBallSpeed * BALL_ACCELERATION;
+        newBallDirY = -newBallDirY;
       }
 
       // Paddle collision Player1
       if (
         newBallX <= PADDLE_WIDTH &&
-        newBallY >= gameState.paddle1Y &&
+        newBallY + BALL_SIZE >= gameState.paddle1Y &&
         newBallY <= gameState.paddle1Y + PADDLE_HEIGHT
       ) {
-        newBallSpeedX = -newBallSpeedX * BALL_ACCELERATION;
+        newBallSpeed = newBallSpeed * BALL_ACCELERATION;
+        newBallDirX = -newBallDirX;
       }
       // Paddle collision Player2
       if (
         newBallX >= canvas.width - PADDLE_WIDTH - BALL_SIZE &&
-        newBallY >= gameState.paddle2Y &&
+        newBallY + BALL_SIZE >= gameState.paddle2Y &&
         newBallY <= gameState.paddle2Y + PADDLE_HEIGHT
       ) {
-        newBallSpeedX = -newBallSpeedX * BALL_ACCELERATION;
+        newBallSpeed = newBallSpeed * BALL_ACCELERATION;
+        newBallDirX = -newBallDirX;
       }
 
       //Register Score Player 1
-      if (newBallX >= canvas.width) {
+      if (newBallX >= canvas.width - BALL_SIZE) {
         newScore1++;
         newBallX = canvas.width / 2;
         newBallY = canvas.height / 2;
-        newBallSpeedX = -BALL_SPEED;
-        newBallSpeedY = -BALL_SPEED;
+        newBallSpeed = BALL_SPEED;
       }
       //Register Score Player 2
-      if (newBallX <= 0 - BALL_SIZE) {
+      if (newBallX <= 0) {
         newScore2++;
         newBallX = canvas.width / 2;
         newBallY = canvas.height / 2;
-        newBallSpeedX = -BALL_SPEED;
-        newBallSpeedY = -BALL_SPEED;
+        newBallSpeed = BALL_SPEED;
       }
 
       // Register winner
@@ -203,10 +211,13 @@ const PongSingle = (props: gameProps) => {
 
       gameStateRef.current = {
         ...gameState,
-        ballX: newBallX,
-        ballY: newBallY,
-        ballSpeedX: newBallSpeedX,
-        ballSpeedY: newBallSpeedY,
+        ball: {
+          x: newBallX,
+          y: newBallY,
+          speed: newBallSpeed,
+          dirX: newBallDirX,
+          dirY: newBallDirY,
+        },
         score1: newScore1,
         score2: newScore2,
       };
@@ -223,7 +234,12 @@ const PongSingle = (props: gameProps) => {
         PADDLE_HEIGHT,
       );
 
-      context.fillRect(gameState.ballX, gameState.ballY, BALL_SIZE, BALL_SIZE);
+      context.fillRect(
+        gameState.ball.x,
+        gameState.ball.y,
+        BALL_SIZE,
+        BALL_SIZE,
+      );
 
       context.font = "30px Arial";
       context.fillText(gameState.score1.toString(), canvas.width / 4, 30);

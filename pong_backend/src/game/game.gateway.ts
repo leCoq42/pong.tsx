@@ -15,6 +15,7 @@ import { GameService } from './game.service';
 export class GameGateway {
   @WebSocketServer() server: Server;
   private matchmakingQueue: Socket[] = [];
+  private gameLoops: Map<string, NodeJS.Timeout> = new Map();
 
   constructor(private gameService: GameService) {}
 
@@ -29,7 +30,16 @@ export class GameGateway {
   handleDisconnect(client: Socket) {
     console.log('Client disconnected: ' + client.id);
     this.removeFromQueue(client);
-    this.gameService.removePlayer(client.id);
+
+    const gameId = this.gameService.getGameIdByPlayerId(client.id);
+    if (gameId) {
+      const gameLoop = this.gameLoops.get(gameId);
+      if (gameLoop) {
+        clearInterval(gameLoop);
+        this.gameLoops.delete(gameId);
+      }
+      this.gameService.removeGame(gameId);
+    }
   }
 
   @SubscribeMessage('joinQueue')
@@ -42,29 +52,45 @@ export class GameGateway {
     }
   }
 
+  @SubscribeMessage('startSinglePlayer')
+  handleSinglePlayerGame(client: Socket) {
+    const gameId = this.gameService.createGame([client.id], 'singleplayer');
+    client.emit('gameStarted', { gameId, mode: 'singleplayer' });
+  }
+
   @SubscribeMessage('updatePosition')
   handleUpdatePosition(client: Socket, position: number) {
-    const game = this.gameService.getGameByPlayerId(client.id);
+    const gameId = this.gameService.getGameIdByPlayerId(client.id);
+    if (!gameId) return;
+
+    if ()
     if (game) {
       const player = game.players.find((p) => p.id === client.id);
       if (player) player.position = position;
     }
   }
 
-  @SubscribeMessage('startSinglePlayer')
-  handleSinglePlayerGame(client: Socket) {
-    const gameId = this.gameService.createGame([client.id]);
-    client.emit('gameStarted', { gameId, mode: 'singlePlater' });
-  }
-
   private startGame(player1: Socket, player2: Socket) {
-    const gameId = this.gameService.createGame([player1.id, player2.id]);
+    const gameId = this.gameService.createGame(
+      [player1.id, player2.id],
+      'multiplayer',
+    );
 
     player1.join(gameId);
     player2.join(gameId);
 
-    player1.emit('gameStarted', { gameId, mode: 'remoteMultiplayer' });
-    player2.emit('gameStarted', { gameId, mode: 'remoteMultiplayer' });
+    player1.emit('gameStarted', { gameId, mode: 'multiplayer' });
+    player2.emit('gameStarted', { gameId, mode: 'multiplayer' });
+
+    const gameLoop = setInterval(() => {
+      const gameState = this.gameService.getGameState(gameId);
+      if (gameState) {
+        this.gameService.updateGameState(gameId);
+        this.server.to(gameId).emit('gameState', gameState);
+      }
+    }, 1000 / 60);
+
+    this.gameLoops.set(gameId, gameLoop);
   }
 
   private removeFromQueue(client: Socket) {
