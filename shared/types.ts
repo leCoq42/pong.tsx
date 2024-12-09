@@ -26,13 +26,15 @@ export type ServerPayloads = {
   };
 };
 
-export interface Room {
-  id: string;
+export interface GameRoom {
+  gameId: string;
   players: Player[];
   mode: "singleplayer" | "multiplayer";
   isActive: boolean;
   isFinished: boolean;
   gameState: GameState;
+  gameConstants: GameConstants;
+  winner?: string;
 }
 
 export interface Player {
@@ -51,9 +53,20 @@ export interface Ball {
 
 export interface GameState {
   ball: Ball;
-  isActive: boolean;
   score1: number;
   score2: number;
   paddle1Y: number;
   paddle2Y: number;
+}
+
+export interface GameConstants {
+  PADDLE_HEIGHT: number;
+  PADDLE_WIDTH: number;
+  BALL_SIZE: number;
+  BALL_SPEED: number;
+  BALL_ACCELERATION: number;
+  PADDLE_SPEED: number;
+  CANVAS_WIDTH: number;
+  CANVAS_HEIGHT: number;
+  WIN_SCORE: number;
 }

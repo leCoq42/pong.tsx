@@ -27,7 +27,6 @@ const PongSingle = (props: gameProps) => {
     paddle2Y: props.gameHeight / 2 - PADDLE_MID,
     score1: 0,
     score2: 0,
-    isActive: true,
   });
 
   const [gameStart, setGameStart] = useState(false);
@@ -51,7 +50,6 @@ const PongSingle = (props: gameProps) => {
       paddle2Y: gameStateRef.current.paddle2Y,
       score1: 0,
       score2: 0,
-      isActive: true,
     };
     setGameOver(false);
     setWinner(null);

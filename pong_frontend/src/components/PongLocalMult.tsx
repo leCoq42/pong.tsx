@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { gameProps, GameState } from "../types";
+import { gameProps } from "../types";
+import { GameState } from "../../../shared/types";
 
 const PADDLE_HEIGHT = 100;
 const PADDLE_WIDTH = 10;
@@ -14,11 +15,13 @@ const PongLocalMult = (props: gameProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const keyRef = useRef<{ [key: string]: boolean }>({});
   const gameStateRef = useRef<GameState>({
-    ballX: 400,
-    ballY: 300,
-    ballDirX: Math.random() > 0.5 ? 1 : -1,
-    ballDirY: Math.random() > 0.5 ? 1 : -1,
-    ballSpeed: BALL_SPEED,
+    ball: {
+      x: 400,
+      y: 300,
+      dirX: Math.random() > 0.5 ? 1 : -1,
+      dirY: Math.random() > 0.5 ? 1 : -1,
+      speed: BALL_SPEED,
+    },
     paddle1Y: 250,
     paddle2Y: 250,
     score1: 0,
@@ -35,16 +38,17 @@ const PongLocalMult = (props: gameProps) => {
 
   const handleRematch = useCallback(() => {
     // const newBallSpeedX =
-    //   gameStateRef.current.ballSpeedX > 0 ? -BALL_SPEED : BALL_SPEED;
     const newBallDirX = Math.random() > 0.5 ? 1 : -1;
     const newBallDirY = Math.random() > 0.5 ? 1 : -1;
 
     gameStateRef.current = {
-      ballX: 400,
-      ballY: 300,
-      ballDirX: newBallDirX,
-      ballDirY: newBallDirY,
-      ballSpeed: BALL_SPEED,
+      ball: {
+        x: 400,
+        y: 300,
+        dirX: newBallDirX,
+        dirY: newBallDirY,
+        speed: BALL_SPEED,
+      },
       paddle1Y: 250,
       paddle2Y: 250,
       score1: 0,
@@ -127,11 +131,13 @@ const PongLocalMult = (props: gameProps) => {
         canvas,
       );
 
-      let newBallX = gameState.ballX + gameState.ballSpeed * gameState.ballDirX;
-      let newBallY = gameState.ballY + gameState.ballSpeed * gameState.ballDirY;
-      let newBallDirX = gameState.ballDirX;
-      let newBallDirY = gameState.ballDirY;
-      let newBallSpeed = gameState.ballSpeed;
+      let newBallX =
+        gameState.ball.x + gameState.ball.speed * gameState.ball.dirX;
+      let newBallY =
+        gameState.ball.y + gameState.ball.speed * gameState.ball.dirY;
+      let newBallDirX = gameState.ball.dirX;
+      let newBallDirY = gameState.ball.dirY;
+      let newBallSpeed = gameState.ball.speed;
       let newScore1 = gameState.score1;
       let newScore2 = gameState.score2;
 
@@ -188,12 +194,15 @@ const PongLocalMult = (props: gameProps) => {
       }
 
       gameStateRef.current = {
-        ...gameState,
-        ballX: newBallX,
-        ballY: newBallY,
-        ballDirX: newBallDirX,
-        ballDirY: newBallDirY,
-        ballSpeed: newBallSpeed,
+        ball: {
+          x: newBallX,
+          y: newBallY,
+          dirX: newBallDirX,
+          dirY: newBallDirY,
+          speed: newBallSpeed,
+        },
+        paddle1Y: gameState.paddle1Y,
+        paddle2Y: gameState.paddle2Y,
         score1: newScore1,
         score2: newScore2,
       };
@@ -212,7 +221,12 @@ const PongLocalMult = (props: gameProps) => {
         PADDLE_HEIGHT,
       );
 
-      context.fillRect(gameState.ballX, gameState.ballY, BALL_SIZE, BALL_SIZE);
+      context.fillRect(
+        gameState.ball.x,
+        gameState.ball.y,
+        BALL_SIZE,
+        BALL_SIZE,
+      );
 
       context.font = "30px Arial";
       context.fillText(gameState.score1.toString(), canvas.width / 4, 30);

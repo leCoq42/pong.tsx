@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import { gameProps } from "../types";
-import { GameState, Player } from "../../../shared/types";
+import { GameRoom, Player } from "../../../shared/types";
 
 const PongRemoteMP = (props: gameProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -45,7 +45,7 @@ const PongRemoteMP = (props: gameProps) => {
     setGameStarted(true);
   };
 
-  const updateCanvas = (gameState: GameState) => {
+  const updateCanvas = (game: GameRoom) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -58,7 +58,7 @@ const PongRemoteMP = (props: gameProps) => {
 
     // Draw paddles
     ctx.fillStyle = "white";
-    gameState.players.forEach((player: Player, index: number) => {
+    game.players.forEach((player: Player, index: number) => {
       ctx.fillRect(
         index === 0 ? 0 : props.gameWidth - 10,
         player.position,
@@ -68,34 +68,34 @@ const PongRemoteMP = (props: gameProps) => {
     });
 
     // Draw ball
-    ctx.fillRect(gameState.ball.x, gameState.ball.y, 10, 10);
+    ctx.fillRect(game.gameState.ball.x, game.gameState.ball.y, 10, 10);
 
     // Draw scores
     ctx.font = "30px Arial";
-    ctx.fillText(gameState.score1.toString(), props.gameWidth / 4, 30);
-    ctx.fillText(gameState.score2.toString(), (props.gameWidth * 3) / 4, 30);
+    ctx.fillText(game.gameState.score1.toString(), props.gameWidth / 4, 30);
+    ctx.fillText(
+      game.gameState.score2.toString(),
+      (props.gameWidth * 3) / 4,
+      30,
+    );
   };
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (!gameStarted) return;
 
+    const PADDLE_SPEED = 10;
+
     if (e.key === "ArrowUp") {
-      socketRef.current?.emit("updatePosition", "up");
+      socketRef.current?.emit("updatePosition", -PADDLE_SPEED);
     } else if (e.key === "ArrowDown") {
-      socketRef.current?.emit("updatePosition", "down");
+      socketRef.current?.emit("updatePosition", PADDLE_SPEED);
     }
   };
-
-  // const handleKeyUp = (e: KeyboardEvent) => {
-  //   if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-  //     socketRef.current?.emit("stopPaddle");
-  //   }
-  // };
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [gameStarted, handleKeyDown]);
+  }, [gameStarted]);
 
   return (
     <div>
@@ -112,7 +112,7 @@ const PongRemoteMP = (props: gameProps) => {
       )}
       {gameOver && (
         <div>
-          <h2>{winner} wins!</h2>
+          <h2>Player: {winner}, wins!</h2>
           <button onClick={() => window.location.reload()}>Play Again</button>
         </div>
       )}

@@ -1,19 +1,19 @@
 import { Injectable } from '@nestjs/common';
 import { v4 as uuid } from 'uuid';
-import { GameState } from '../../../shared/types';
+import { GameRoom, GameState, Player, Ball } from '../../../shared/types';
 
 @Injectable()
 export class GameService {
-  private games: Map<string, GameState> = new Map();
-  private gameLoops: Map<string, NodeJS.Timeout> = new Map();
+  private rooms: Map<string, GameRoom> = new Map();
   private playerGameMap: Map<string, string> = new Map();
+  private gameLoops: Map<string, NodeJS.Timeout> = new Map();
 
-  private readonly GAME_CONSTANTS = {
+  private readonly DEFAULT_GAME_CONSTANTS = {
     FRAME_RATE: 60,
     PADDLE_HEIGHT: 100,
     PADDLE_WIDTH: 10,
     BALL_SIZE: 10,
-    BALL_SPEED: 1,
+    BALL_SPEED: 2,
     BALL_ACCELERATION: 1.1,
     PADDLE_SPEED: 10,
     CANVAS_WIDTH: 800,
@@ -21,148 +21,170 @@ export class GameService {
     WIN_SCORE: 3,
   };
 
-  createGame(players: string[], mode: 'singleplayer' | 'multiplayer'): string {
+  createGame(
+    playerIds: string[],
+    mode: 'singleplayer' | 'multiplayer',
+  ): string {
     const gameId = uuid();
-    const gameState = this.createInitialGameState();
+    const initialGameState = this.createInitialGameState();
 
-    this.games.set(gameId, {
-      ...gameState,
-      players: players.map((id) => ({
-        id,
-        position: this.GAME_CONSTANTS.CANVAS_HEIGHT / 2,
-        score: 0,
-      })),
+    const players: Player[] = playerIds.map((id) => ({
+      id,
+      position: this.DEFAULT_GAME_CONSTANTS.CANVAS_HEIGHT / 2,
+      score: 0,
+    }));
+
+    const gameRoom: GameRoom = {
+      gameId,
+      players,
+      mode,
       isActive: true,
-      mode: mode,
-    });
+      isFinished: false,
+      gameState: initialGameState,
+      gameConstants: { ...this.DEFAULT_GAME_CONSTANTS },
+    };
 
-    players.forEach((playerId) => {
+    this.rooms.set(gameId, gameRoom);
+    playerIds.forEach((playerId) => {
       this.playerGameMap.set(playerId, gameId);
     });
     return gameId;
   }
 
-  getGameIdByPlayerId(playerId: string): string | undefined {
-    return this.playerGameMap.get(playerId);
-  }
-
   private createInitialGameState(): GameState {
+    const ball: Ball = {
+      x: this.DEFAULT_GAME_CONSTANTS.CANVAS_WIDTH / 2,
+      y: this.DEFAULT_GAME_CONSTANTS.CANVAS_HEIGHT / 2,
+      dirX: Math.random() > 0.5 ? 1 : -1,
+      dirY: Math.random() > 0.5 ? 1 : -1,
+      speed: this.DEFAULT_GAME_CONSTANTS.BALL_SPEED,
+    };
+
     return {
-      ball: {
-        x: this.GAME_CONSTANTS.CANVAS_WIDTH / 2,
-        y: this.GAME_CONSTANTS.CANVAS_HEIGHT / 2,
-        dirX: Math.random() > 0.5 ? 1 : -1,
-        dirY: Math.random() > 0.5 ? 1 : -1,
-        speed: this.GAME_CONSTANTS.BALL_SPEED,
-      },
-      players: [],
+      ball,
       score1: 0,
       score2: 0,
-      isActive: false,
-      mode: 'singleplayer',
+      paddle1Y: this.DEFAULT_GAME_CONSTANTS.CANVAS_HEIGHT / 2,
+      paddle2Y: this.DEFAULT_GAME_CONSTANTS.CANVAS_HEIGHT / 2,
     };
   }
 
   updateGameState(gameId: string): void {
-    const game = this.games.get(gameId);
+    const game = this.rooms.get(gameId);
     if (!game || !game.isActive) return;
 
     // Update ball position
-    game.ball.x += game.ball.speed * game.ball.dirX;
-    game.ball.y += game.ball.speed * game.ball.dirY;
+    game.gameState.ball.x +=
+      game.gameState.ball.speed * game.gameState.ball.dirX;
+    game.gameState.ball.y +=
+      game.gameState.ball.speed * game.gameState.ball.dirY;
+
+    this.handleCollisions(game);
+    this.checkScore(game);
+    this.checkWinCondition(game);
+  }
+
+  private handleCollisions(game: GameRoom): void {
+    const { ball } = game.gameState;
+    const {
+      CANVAS_HEIGHT,
+      CANVAS_WIDTH,
+      PADDLE_HEIGHT,
+      PADDLE_WIDTH,
+      BALL_SIZE,
+      BALL_ACCELERATION,
+    } = game.gameConstants;
 
     // Wall collisions
     if (
-      game.ball.y <= 0 ||
-      game.ball.y >=
-        this.GAME_CONSTANTS.CANVAS_HEIGHT - this.GAME_CONSTANTS.BALL_SIZE
+      game.gameState.ball.y <= 0 ||
+      game.gameState.ball.y >= CANVAS_HEIGHT - BALL_SIZE
     ) {
-      game.ball.dirY *= -1;
-      game.ball.speed *= this.GAME_CONSTANTS.BALL_ACCELERATION;
+      game.gameState.ball.dirY *= -1;
+      game.gameState.ball.speed *= BALL_ACCELERATION;
     }
 
-    // Paddle collisions
-    const [player1, player2] = game.players;
+    // paddle collision
+    game.players.forEach((player, index) => {
+      const paddleX =
+        index === 0 ? PADDLE_WIDTH : CANVAS_WIDTH - PADDLE_WIDTH - BALL_SIZE;
+      const paddleY = player.position;
 
-    // Player 1 paddle collision
-    if (
-      game.ball.x <= this.GAME_CONSTANTS.PADDLE_WIDTH &&
-      game.ball.y >= player1.position &&
-      game.ball.y <= player1.position + this.GAME_CONSTANTS.PADDLE_HEIGHT
-    ) {
-      game.ball.dirX *= -1;
-      game.ball.speed *= this.GAME_CONSTANTS.BALL_ACCELERATION;
-    }
+      if (
+        ball.x <= paddleX + PADDLE_WIDTH &&
+        ball.x >= paddleX - BALL_SIZE &&
+        ball.y + BALL_SIZE >= paddleY &&
+        ball.y <= paddleY + PADDLE_HEIGHT
+      ) {
+        ball.dirX *= -1;
+        ball.speed *= BALL_ACCELERATION;
+      }
+    });
+  }
 
-    // Player 2 paddle collision
-    if (
-      game.ball.x >=
-        this.GAME_CONSTANTS.CANVAS_WIDTH -
-          this.GAME_CONSTANTS.PADDLE_WIDTH -
-          this.GAME_CONSTANTS.BALL_SIZE &&
-      game.ball.y >= player2.position &&
-      game.ball.y <= player2.position + this.GAME_CONSTANTS.PADDLE_HEIGHT
-    ) {
-      game.ball.dirX *= -1;
-      game.ball.speed *= this.GAME_CONSTANTS.BALL_ACCELERATION;
-    }
-
-    // Score points
-    if (game.ball.x >= this.GAME_CONSTANTS.CANVAS_WIDTH) {
-      game.score1++;
+  private checkScore(game: GameRoom): void {
+    const { ball } = game.gameState;
+    const { CANVAS_WIDTH } = game.gameConstants;
+    if (ball.x >= CANVAS_WIDTH) {
+      game.gameState.score1++;
+      game.players[0].score++;
       this.resetBall(game);
-    }
-    if (game.ball.x <= 0) {
-      game.score2++;
+    } else if (ball.x <= 0) {
+      game.gameState.score2++;
+      game.players[1].score++;
       this.resetBall(game);
-    }
-
-    // Check win condition
-    if (
-      game.score1 >= this.GAME_CONSTANTS.WIN_SCORE ||
-      game.score2 >= this.GAME_CONSTANTS.WIN_SCORE
-    ) {
-      game.isActive = false;
     }
   }
 
-  private resetBall(game: GameState): void {
-    game.ball = {
-      x: this.GAME_CONSTANTS.CANVAS_WIDTH / 2,
-      y: this.GAME_CONSTANTS.CANVAS_HEIGHT / 2,
+  private checkWinCondition(game: GameRoom): void {
+    const { WIN_SCORE } = game.gameConstants;
+
+    const winner = game.players.find((player) => player.score >= WIN_SCORE);
+    if (winner) {
+      game.isActive = false;
+      game.isFinished = true;
+      game.winner = winner.id;
+    }
+  }
+
+  private resetBall(game: GameRoom): void {
+    const { CANVAS_WIDTH, CANVAS_HEIGHT, BALL_SPEED } = game.gameConstants;
+
+    game.gameState.ball = {
+      x: CANVAS_WIDTH / 2,
+      y: CANVAS_HEIGHT / 2,
       dirX: Math.random() > 0.5 ? 1 : -1,
       dirY: Math.random() > 0.5 ? 1 : -1,
-      speed: this.GAME_CONSTANTS.BALL_SPEED,
+      speed: BALL_SPEED,
     };
   }
 
   updatePlayerPosition(
     gameId: string,
     playerId: string,
-    position: number,
+    newPosition: number,
   ): void {
-    const game = this.games.get(gameId);
+    const game = this.rooms.get(gameId);
     if (!game) return;
 
     const player = game.players.find((p) => p.id === playerId);
     if (player) {
-      player.position = Math.max(
-        0,
-        Math.min(
-          position,
-          this.GAME_CONSTANTS.CANVAS_HEIGHT - this.GAME_CONSTANTS.PADDLE_HEIGHT,
-        ),
-      );
+      const maxPosition =
+        game.gameConstants.CANVAS_HEIGHT - game.gameConstants.PADDLE_HEIGHT;
+      player.position = Math.max(0, Math.min(newPosition, maxPosition));
     }
   }
 
-  getGameState(gameId: string): GameState | undefined {
-    return this.games.get(gameId);
+  getGameRoom(gameId: string): GameRoom | undefined {
+    return this.rooms.get(gameId);
   }
 
-  getGameByPlayerId(playerId: string): GameState | undefined {
-    const gameId = this.playerGameMap.get(playerId);
-    return gameId ? this.games.get(gameId) : undefined;
+  getGameIdByPlayerId(playerId: string): string | undefined {
+    return this.playerGameMap.get(playerId);
+  }
+
+  getGameByPlayerId(playerId: string): string | undefined {
+    return this.playerGameMap.get(playerId);
   }
 
   removePlayer(playerId: string) {
@@ -173,26 +195,31 @@ export class GameService {
     }
   }
 
-  removeGame(gameId: string) {
-    this.stopGameLoop(gameId);
-    this.games.delete(gameId);
+  removeGame(gameId: string): void {
+    const game = this.rooms.get(gameId);
+    if (game) {
+      game.players.forEach((player) => {
+        this.playerGameMap.delete(player.id);
+      });
+      this.rooms.delete(gameId);
+    }
   }
 
   private startGameLoop(gameId: string) {
     const interval = setInterval(() => {
-      const gameState = this.games.get(gameId);
+      const gameState = this.rooms.get(gameId);
       if (!gameState || !gameState.isActive) {
         this.stopGameLoop(gameId);
         return;
       }
       this.updateGameState(gameId);
-    }, 1000 / this.GAME_CONSTANTS.FRAME_RATE);
+    }, 1000 / this.DEFAULT_GAME_CONSTANTS.FRAME_RATE);
     this.gameLoops.set(gameId, interval);
   }
 
   stopGame(gameId: string) {
     this.stopGameLoop(gameId);
-    this.games.delete(gameId);
+    this.rooms.delete(gameId);
   }
 
   private stopGameLoop(gameId: string) {
