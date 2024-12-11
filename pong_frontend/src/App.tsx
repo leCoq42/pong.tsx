@@ -1,33 +1,44 @@
 import "./App.css";
 import { Routes, Route } from "react-router-dom";
-import PongLanding from "./components/PongLanding";
-import PongRemoteMP from "./components/PongRemoteMP";
-import PongLocalMult from "./components/PongLocalMult";
-import PongSingle from "./components/PongSingle";
+import React, { Suspense, lazy } from "react";
 import NavBar from "./components/NavBar";
+
+const PongLanding = lazy(() => import("./components/PongLanding"));
+const PongRemoteMP = lazy(() => import("./components/PongRemoteMP"));
+const PongLocalMult = lazy(() => import("./components/PongLocalMult"));
+const PongSingle = lazy(() => import("./components/PongSingle"));
 
 function App() {
   return (
     <>
       <NavBar />
-      <Routes>
-        <Route index path="/" element={<PongRemoteMP />} />
-        <Route path="game" element={<PongLanding />}>
+      <Suspense fallback={<div>Loading...</div>}>
+        <Routes>
           <Route
-            path="local-mp"
-            element={<PongLocalMult gameWidth={800} gameHeight={600} />}
-          />
-          <Route
-            path="remote-mp"
+            index
+            path="/"
             element={<PongRemoteMP gameWidth={800} gameHeight={600} />}
           />
-          <Route
-            path="singleplayer"
-            element={<PongSingle gameWidth={800} gameHeight={600} />}
-          />
-          <Route path="*" element={<PongRemoteMP />} />
-        </Route>
-      </Routes>
+          <Route path="game" element={<PongLanding />}>
+            <Route
+              path="local-mp"
+              element={<PongLocalMult gameWidth={800} gameHeight={600} />}
+            />
+            <Route
+              path="remote-mp"
+              element={<PongRemoteMP gameWidth={800} gameHeight={600} />}
+            />
+            <Route
+              path="singleplayer"
+              element={<PongSingle gameWidth={800} gameHeight={600} />}
+            />
+            <Route
+              path="*"
+              element={<PongRemoteMP gameWidth={800} gameHeight={600} />}
+            />
+          </Route>
+        </Routes>
+      </Suspense>
     </>
   );
 }

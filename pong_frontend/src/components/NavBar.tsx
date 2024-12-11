@@ -6,14 +6,26 @@ const NavBar = () => {
   };
   return (
     <nav>
-      <ul>
-        <NavLink style={padding} to="/">
+      <ul style={{ listStyle: "none", display: "flex", gap: "10px" }}>
+        <NavLink
+          style={padding}
+          to="/"
+          className={({ isActive }) => (isActive ? "active" : undefined)}
+        >
           Home
         </NavLink>
-        <NavLink style={padding} to="/game">
+        <NavLink
+          style={padding}
+          to="/game"
+          className={({ isActive }) => (isActive ? "active" : undefined)}
+        >
           Game
         </NavLink>
-        <NavLink style={padding} to="/chat">
+        <NavLink
+          style={padding}
+          to="/chat"
+          className={({ isActive }) => (isActive ? "active" : undefined)}
+        >
           Chat
         </NavLink>
       </ul>

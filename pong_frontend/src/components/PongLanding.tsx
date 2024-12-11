@@ -11,13 +11,25 @@ const PongLanding = () => {
       <div style={padding} className="gamemode">
         Choose game mode
       </div>
-      <button className="btn" onClick={() => navigate("local-mp")}>
+      <button
+        className="btn"
+        onClick={() => navigate("local-mp")}
+        aria-label="Start Local Multiplayer Game"
+      >
         Local Multiplayer
       </button>
-      <button className="btn" onClick={() => navigate("remote-mp")}>
+      <button
+        className="btn"
+        onClick={() => navigate("remote-mp")}
+        aria-label="Start Remote Multiplayer Game"
+      >
         Remote Multiplayer
       </button>
-      <button className="btn" onClick={() => navigate("singleplayer")}>
+      <button
+        className="btn"
+        onClick={() => navigate("singleplayer")}
+        aria-label="Start Singleplayer Game"
+      >
         Singleplayer
       </button>
       <Outlet />

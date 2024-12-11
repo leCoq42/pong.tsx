@@ -1,10 +1,15 @@
 import {
+  OnGatewayDisconnect,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { GameService } from './game.service';
+import { GameRoom } from '../../../shared/types';
+import { Logger } from '@nestjs/common';
+
+const SERVER_TICK_RATE = 1000 / 60;
 
 @WebSocketGateway({
   cors: {
@@ -12,33 +17,46 @@ import { GameService } from './game.service';
   },
   namespace: 'game',
 })
-export class GameGateway {
+export class GameGateway implements OnGatewayDisconnect {
   @WebSocketServer() server: Server;
   private matchmakingQueue: Socket[] = [];
   private gameLoops: Map<string, NodeJS.Timeout> = new Map();
+  private readonly logger = new Logger(GameGateway.name);
 
   constructor(private gameService: GameService) {}
 
   afterInit() {
-    console.log('Game Gateway Initialized');
+    this.logger.log('Game Gateway Initialized');
   }
 
   handleConnection(client: Socket) {
-    console.log('Client connected: ' + client.id);
+    this.logger.log('Client connected: ' + client.id);
   }
 
   handleDisconnect(client: Socket) {
-    console.log('Client disconnected: ' + client.id);
-    this.removeFromQueue(client);
+    try {
+      this.logger.log(`Client disconnected: ${client.id}`);
+      this.removeFromQueue(client);
+      const gameId = this.gameService.getGameIdByPlayerId(client.id);
+      if (gameId) {
+        const updatedGame = this.gameService.handlePlayerDisconnect(
+          gameId,
+          client.id,
+        );
 
-    const gameId = this.gameService.getGameIdByPlayerId(client.id);
-    if (gameId) {
-      const gameLoop = this.gameLoops.get(gameId);
-      if (gameLoop) {
-        clearInterval(gameLoop);
-        this.gameLoops.delete(gameId);
+        if (updatedGame) {
+          this.server.to(gameId).emit('playerDisconnected', {
+            playerId: client.id,
+            gameState: updatedGame,
+          });
+
+          if (!updatedGame.isActive) {
+            this.handleGameOver(gameId, updatedGame);
+          }
+        }
       }
-      this.gameService.removeGame(gameId);
+    } catch (e) {
+      this.logger.log(`Error on disconnect: ${e}`);
     }
   }
 
@@ -59,17 +77,19 @@ export class GameGateway {
   }
 
   @SubscribeMessage('updatePosition')
-  handleUpdatePosition(client: Socket, delta: number) {
+  handleUpdatePosition(client: Socket, payload: { dir: number }) {
     const gameId = this.gameService.getGameIdByPlayerId(client.id);
     if (!gameId) return;
 
     const game = this.gameService.getGameRoom(gameId);
     if (!game) return;
 
-    const player = game.players.find((p) => p.id === client.id);
-    if (!player) return;
+    const playerIndex = game.clients.findIndex((p) => p.id === client.id);
+    if (playerIndex === -1) return;
 
-    const newPosition = player.position + delta;
+    const currentPosition = game.gameState.players[playerIndex].position;
+    const newPosition =
+      currentPosition + game.gameConstants.PADDLE_SPEED * payload.dir;
     const maxPosition =
       game.gameConstants.CANVAS_HEIGHT - game.gameConstants.PADDLE_HEIGHT;
     const finalPosition = Math.max(0, Math.min(newPosition, maxPosition));
@@ -88,8 +108,8 @@ export class GameGateway {
 
     const game = this.gameService.getGameRoom(gameId);
 
-    player1.emit('gameStarted', game);
-    player2.emit('gameStarted', game);
+    player1.emit('gameStarted', { gameId, mode: 'multiplayer', game });
+    player2.emit('gameStarted', { gameId, mode: 'multiplayer', game });
 
     const gameInterval = setInterval(() => {
       const currentGame = this.gameService.getGameRoom(gameId);
@@ -101,14 +121,23 @@ export class GameGateway {
       if (!currentGame.isActive) {
         clearInterval(gameInterval);
         if (currentGame.isFinished) {
-          const winner = currentGame.winner === player1.id ? '1' : '2';
-          this.server.to(gameId).emit('gameOver', { winner: winner });
+          this.handleGameOver(gameId, currentGame);
         }
         return;
       }
       this.gameService.updateGameState(gameId);
       this.server.to(gameId).emit('gameState', currentGame);
-    }, 1000 / 60);
+    }, SERVER_TICK_RATE);
+  }
+
+  private handleGameOver(gameId: string, game: GameRoom) {
+    if (!game.winner) return;
+
+    const winnerIdx = game.clients.findIndex((p) => p.id === game.winner);
+    this.server.to(gameId).emit('gameOver', {
+      winner: (winnerIdx + 1).toString(),
+      reason: game.isFinished ? 'win' : 'disconnection',
+    });
   }
 
   private removeFromQueue(client: Socket) {

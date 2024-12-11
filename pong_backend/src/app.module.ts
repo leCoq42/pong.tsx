@@ -4,6 +4,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { GameModule } from './game/game.module';
 import { SequelizeModule } from '@nestjs/sequelize';
+// import { GameRoom } from './game/game.model';
 
 @Module({
   imports: [
@@ -11,11 +12,11 @@ import { SequelizeModule } from '@nestjs/sequelize';
     SequelizeModule.forRoot({
       dialect: 'postgres',
       host: 'localhost',
-      port: 3306,
+      port: 5432,
       database: 'transcendent',
       username: 'dbuser',
       password: 'test',
-      models: [],
+      // models: [GameRoom],
     }),
     GameModule,
   ],

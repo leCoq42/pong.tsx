@@ -1,19 +1,28 @@
 import { Injectable } from '@nestjs/common';
 import { v4 as uuid } from 'uuid';
-import { GameRoom, GameState, Player, Ball } from '../../../shared/types';
+import {
+  GameRoom,
+  GameState,
+  Client,
+  Player,
+  Ball,
+} from '../../../shared/types';
+import { Logger } from '@nestjs/common';
+
+const SERVER_TICK_RATE = 1000 / 120;
 
 @Injectable()
 export class GameService {
   private rooms: Map<string, GameRoom> = new Map();
   private playerGameMap: Map<string, string> = new Map();
   private gameLoops: Map<string, NodeJS.Timeout> = new Map();
+  private readonly logger = new Logger(GameService.name);
 
   private readonly DEFAULT_GAME_CONSTANTS = {
-    FRAME_RATE: 60,
     PADDLE_HEIGHT: 100,
     PADDLE_WIDTH: 10,
     BALL_SIZE: 10,
-    BALL_SPEED: 2,
+    BALL_SPEED: 1,
     BALL_ACCELERATION: 1.1,
     PADDLE_SPEED: 10,
     CANVAS_WIDTH: 800,
@@ -28,19 +37,22 @@ export class GameService {
     const gameId = uuid();
     const initialGameState = this.createInitialGameState();
 
-    const players: Player[] = playerIds.map((id) => ({
+    const clients: Client[] = playerIds.map((id) => ({
       id,
-      position: this.DEFAULT_GAME_CONSTANTS.CANVAS_HEIGHT / 2,
+    }));
+
+    const players: Player[] = playerIds.map(() => ({
       score: 0,
+      position: this.DEFAULT_GAME_CONSTANTS.CANVAS_HEIGHT / 2,
     }));
 
     const gameRoom: GameRoom = {
       gameId,
-      players,
+      clients,
       mode,
       isActive: true,
       isFinished: false,
-      gameState: initialGameState,
+      gameState: { ball: initialGameState.ball, players },
       gameConstants: { ...this.DEFAULT_GAME_CONSTANTS },
     };
 
@@ -48,6 +60,8 @@ export class GameService {
     playerIds.forEach((playerId) => {
       this.playerGameMap.set(playerId, gameId);
     });
+
+    this.startGameLoop(gameId);
     return gameId;
   }
 
@@ -62,26 +76,26 @@ export class GameService {
 
     return {
       ball,
-      score1: 0,
-      score2: 0,
-      paddle1Y: this.DEFAULT_GAME_CONSTANTS.CANVAS_HEIGHT / 2,
-      paddle2Y: this.DEFAULT_GAME_CONSTANTS.CANVAS_HEIGHT / 2,
+      players: [],
     };
   }
 
   updateGameState(gameId: string): void {
-    const game = this.rooms.get(gameId);
-    if (!game || !game.isActive) return;
+    try {
+      const game = this.rooms.get(gameId);
+      if (!game || !game.isActive) return;
 
-    // Update ball position
-    game.gameState.ball.x +=
-      game.gameState.ball.speed * game.gameState.ball.dirX;
-    game.gameState.ball.y +=
-      game.gameState.ball.speed * game.gameState.ball.dirY;
+      game.gameState.ball.x +=
+        game.gameState.ball.speed * game.gameState.ball.dirX;
+      game.gameState.ball.y +=
+        game.gameState.ball.speed * game.gameState.ball.dirY;
 
-    this.handleCollisions(game);
-    this.checkScore(game);
-    this.checkWinCondition(game);
+      this.handleCollisions(game);
+      this.checkScore(game);
+      this.checkWinCondition(game);
+    } catch (error) {
+      this.logger.error(`Error updating game state: ${error}`);
+    }
   }
 
   private handleCollisions(game: GameRoom): void {
@@ -95,7 +109,6 @@ export class GameService {
       BALL_ACCELERATION,
     } = game.gameConstants;
 
-    // Wall collisions
     if (
       game.gameState.ball.y <= 0 ||
       game.gameState.ball.y >= CANVAS_HEIGHT - BALL_SIZE
@@ -104,8 +117,7 @@ export class GameService {
       game.gameState.ball.speed *= BALL_ACCELERATION;
     }
 
-    // paddle collision
-    game.players.forEach((player, index) => {
+    game.gameState.players.forEach((player, index) => {
       const paddleX =
         index === 0 ? PADDLE_WIDTH : CANVAS_WIDTH - PADDLE_WIDTH - BALL_SIZE;
       const paddleY = player.position;
@@ -124,14 +136,12 @@ export class GameService {
 
   private checkScore(game: GameRoom): void {
     const { ball } = game.gameState;
-    const { CANVAS_WIDTH } = game.gameConstants;
-    if (ball.x >= CANVAS_WIDTH) {
-      game.gameState.score1++;
-      game.players[0].score++;
+    const { CANVAS_WIDTH, BALL_SIZE } = game.gameConstants;
+    if (ball.x >= CANVAS_WIDTH - BALL_SIZE) {
+      game.gameState.players[0].score++;
       this.resetBall(game);
     } else if (ball.x <= 0) {
-      game.gameState.score2++;
-      game.players[1].score++;
+      game.gameState.players[1].score++;
       this.resetBall(game);
     }
   }
@@ -139,11 +149,14 @@ export class GameService {
   private checkWinCondition(game: GameRoom): void {
     const { WIN_SCORE } = game.gameConstants;
 
-    const winner = game.players.find((player) => player.score >= WIN_SCORE);
-    if (winner) {
+    const winnerIdx = game.gameState.players.findIndex(
+      (player) => player.score >= WIN_SCORE,
+    );
+    if (winnerIdx != -1) {
       game.isActive = false;
       game.isFinished = true;
-      game.winner = winner.id;
+      game.winner = game.clients[winnerIdx].id;
+      this.rooms.set(game.gameId, game);
     }
   }
 
@@ -167,11 +180,16 @@ export class GameService {
     const game = this.rooms.get(gameId);
     if (!game) return;
 
-    const player = game.players.find((p) => p.id === playerId);
-    if (player) {
+    const playerIdx = game.clients.findIndex(
+      (player) => player.id === playerId,
+    );
+    if (playerIdx != -1) {
       const maxPosition =
         game.gameConstants.CANVAS_HEIGHT - game.gameConstants.PADDLE_HEIGHT;
-      player.position = Math.max(0, Math.min(newPosition, maxPosition));
+      game.gameState.players[playerIdx].position = Math.max(
+        0,
+        Math.min(newPosition, maxPosition),
+      );
     }
   }
 
@@ -187,21 +205,41 @@ export class GameService {
     return this.playerGameMap.get(playerId);
   }
 
-  removePlayer(playerId: string) {
+  isPlayerInGame(playerId: string): boolean {
+    return this.playerGameMap.has(playerId);
+  }
+
+  getOpponent(gameId: string, playerId: string): Player | undefined {
+    const game = this.rooms.get(gameId);
+    if (!game) return undefined;
+
+    return game.gameState.players.find(
+      (_, index) => game.clients[index].id !== playerId,
+    );
+  }
+
+  removeGame(playerId: string) {
     const gameId = this.playerGameMap.get(playerId);
     if (gameId) {
-      this.stopGame(gameId);
+      this.cleanUpGame(gameId);
       this.playerGameMap.delete(playerId);
     }
   }
 
-  removeGame(gameId: string): void {
+  private cleanUpGame(gameId: string): void {
+    this.stopGameLoop(gameId);
     const game = this.rooms.get(gameId);
     if (game) {
-      game.players.forEach((player) => {
+      game.clients.forEach((player) => {
         this.playerGameMap.delete(player.id);
       });
       this.rooms.delete(gameId);
+
+      const gameLoop = this.gameLoops.get(gameId);
+      if (gameLoop) {
+        clearInterval(gameLoop);
+        this.gameLoops.delete(gameId);
+      }
     }
   }
 
@@ -213,13 +251,8 @@ export class GameService {
         return;
       }
       this.updateGameState(gameId);
-    }, 1000 / this.DEFAULT_GAME_CONSTANTS.FRAME_RATE);
+    }, 1000 / SERVER_TICK_RATE);
     this.gameLoops.set(gameId, interval);
-  }
-
-  stopGame(gameId: string) {
-    this.stopGameLoop(gameId);
-    this.rooms.delete(gameId);
   }
 
   private stopGameLoop(gameId: string) {
@@ -228,5 +261,36 @@ export class GameService {
       clearInterval(interval);
       this.gameLoops.delete(gameId);
     }
+  }
+
+  handlePlayerDisconnect(
+    gameId: string,
+    playerId: string,
+  ): GameRoom | undefined {
+    const game = this.rooms.get(gameId);
+    if (!game) return undefined;
+
+    const playerIdx = game.clients.findIndex((c) => c.id === playerId);
+    const opponentIdx = game.clients.findIndex((c) => c.id !== playerId);
+
+    if (playerIdx === -1 || opponentIdx === -1) return undefined;
+
+    if (game.mode === 'multiplayer') {
+      game.isActive = false;
+      game.isFinished = true;
+      game.winner = game.clients[opponentIdx].id;
+
+      this.rooms.set(gameId, game);
+
+      setTimeout(() => {
+        this.cleanUpGame(gameId);
+      }, 5000);
+
+      return game;
+    } else if (game.mode === 'singleplayer') {
+      this.cleanUpGame(gameId);
+      return undefined;
+    }
+    return undefined;
   }
 }

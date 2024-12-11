@@ -28,7 +28,7 @@ export type ServerPayloads = {
 
 export interface GameRoom {
   gameId: string;
-  players: Player[];
+  clients: Client[];
   mode: "singleplayer" | "multiplayer";
   isActive: boolean;
   isFinished: boolean;
@@ -37,10 +37,13 @@ export interface GameRoom {
   winner?: string;
 }
 
-export interface Player {
+export interface Client {
   id: string;
-  position: number;
+}
+
+export interface Player {
   score: number;
+  position: number;
 }
 
 export interface Ball {
@@ -53,10 +56,7 @@ export interface Ball {
 
 export interface GameState {
   ball: Ball;
-  score1: number;
-  score2: number;
-  paddle1Y: number;
-  paddle2Y: number;
+  players: Player[];
 }
 
 export interface GameConstants {

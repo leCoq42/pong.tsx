@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import { gameProps } from "../types";
-import { GameRoom, Player } from "../../../shared/types";
+import { GameRoom } from "../../../shared/types";
+
+const lerp = (start: number, end: number, t: number) => {
+  t = Math.max(0, Math.min(1, t));
+  return start * (1 - t) + end * t;
+};
 
 const PongRemoteMP = (props: gameProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -10,34 +15,124 @@ const PongRemoteMP = (props: gameProps) => {
   const [gameOver, setGameOver] = useState(false);
   const [winner, setWinner] = useState<string | null>(null);
   const [gameMode, setGameMode] = useState<string>("");
+  const [disconnectMessage, setDisconnectMessage] = useState<string>("");
+  const [previousGameState, setPreviousGameState] = useState<GameRoom | null>(
+    null,
+  );
+  const [currentGameState, setCurrentGameState] = useState<GameRoom | null>(
+    null,
+  );
+  const lastUpdateTime = useRef<number>(0);
 
   useEffect(() => {
-    socketRef.current = io("http://localhost:3000/game");
+    socketRef.current?.on("gameState", (gameState) => {
+      setPreviousGameState(currentGameState);
+      setCurrentGameState(gameState);
+      lastUpdateTime.current = performance.now();
+    });
+  }, [currentGameState]);
+
+  useEffect(() => {
+    socketRef.current = io("http://localhost:3000/game", {
+      reconnectionAttempts: 5,
+      transports: ["websocket"],
+    });
 
     socketRef.current.on("connect", () => {
       console.log("Connected to server");
     });
 
-    socketRef.current.on("gameStarted", ({ gameId, mode }) => {
-      console.log("Game started:", gameId, mode);
-      setGameStarted(true);
-      setGameMode(mode);
-    });
+    socketRef.current.on(
+      "playerDisconnected",
+      (data: { playerId: string; gameState: GameRoom }) => {
+        console.log("Player disconnected", data);
 
-    socketRef.current.on("gameState", (gameState) => {
-      console.log("Received game state: ", gameState);
-      updateCanvas(gameState);
-    });
+        if (data && data.gameState) {
+          updateCanvas(data.gameState);
+        }
+        setDisconnectMessage("Opponent disconnected");
+      },
+    );
 
-    socketRef.current.on("gameOver", ({ winner }) => {
-      setGameOver(true);
-      setWinner(winner);
-    });
+    socketRef.current.on(
+      "gameStarted",
+      (data: { gameId: string; mode: string; game: GameRoom }) => {
+        console.log("Game started:", data);
+        setGameStarted(true);
+        setGameMode(data.mode);
+        setDisconnectMessage("");
+        setCurrentGameState(data.game);
+      },
+    );
+
+    socketRef.current.on(
+      "gameOver",
+      (data: { winner: string; reason: string }) => {
+        console.log("Game Over message received: ", data);
+        setGameStarted(false);
+        setGameOver(true);
+        setWinner(data.winner);
+
+        if (data.reason === "disconnection") {
+          setDisconnectMessage(
+            `Opponent disconnected, Player ${data.winner} wins!`,
+          );
+        }
+      },
+    );
 
     return () => {
       socketRef.current?.disconnect();
     };
   }, []);
+
+  useEffect(() => {
+    let animationFrameId: number;
+
+    const render = (timestamp: number) => {
+      if (currentGameState && previousGameState) {
+        const timeSinceUpdate = timestamp - lastUpdateTime.current;
+        const interpolationFactor = Math.min(timeSinceUpdate / (1000 / 60), 1);
+
+        const interpolatedState: GameRoom = {
+          ...currentGameState,
+          gameState: {
+            ball: {
+              ...currentGameState.gameState.ball,
+              x: lerp(
+                previousGameState.gameState.ball.x,
+                currentGameState.gameState.ball.x,
+                interpolationFactor,
+              ),
+              y: lerp(
+                previousGameState.gameState.ball.y,
+                currentGameState.gameState.ball.y,
+                interpolationFactor,
+              ),
+            },
+            players: currentGameState.gameState.players.map((player, i) => ({
+              ...player,
+              position: lerp(
+                previousGameState.gameState.players[i].position,
+                player.position,
+                interpolationFactor,
+              ),
+            })),
+          },
+        };
+        updateCanvas(interpolatedState);
+      }
+      animationFrameId = requestAnimationFrame(render);
+    };
+    if (gameStarted) {
+      animationFrameId = requestAnimationFrame(render);
+    }
+    return () => {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+      }
+    };
+  }, [currentGameState, previousGameState, gameStarted]);
 
   const handleStartGame = () => {
     console.log("Joining queue");
@@ -46,49 +141,61 @@ const PongRemoteMP = (props: gameProps) => {
   };
 
   const updateCanvas = (game: GameRoom) => {
+    if (!game) {
+      console.log("No game state to render");
+      return;
+    }
+
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) {
+      console.log("No canvas element");
+      return;
+    }
 
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    const ctx = canvas.getContext("2d", { alpha: false });
+    if (!ctx) {
+      console.log("No canvas context");
+      return;
+    }
 
-    // Clear canvas
+    ctx.save();
     ctx.fillStyle = "black";
     ctx.fillRect(0, 0, props.gameWidth, props.gameHeight);
 
-    // Draw paddles
     ctx.fillStyle = "white";
-    game.players.forEach((player: Player, index: number) => {
-      ctx.fillRect(
-        index === 0 ? 0 : props.gameWidth - 10,
-        player.position,
-        10,
-        100,
-      );
+
+    // Draw paddles
+    game.gameState.players.forEach((player, index) => {
+      const paddleX = index === 0 ? 0 : props.gameWidth - 10;
+      ctx.fillRect(paddleX, Math.round(player.position), 10, 100);
     });
 
     // Draw ball
-    ctx.fillRect(game.gameState.ball.x, game.gameState.ball.y, 10, 10);
+    ctx.fillRect(
+      Math.round(game.gameState.ball.x),
+      Math.round(game.gameState.ball.y),
+      10,
+      10,
+    );
 
     // Draw scores
     ctx.font = "30px Arial";
-    ctx.fillText(game.gameState.score1.toString(), props.gameWidth / 4, 30);
-    ctx.fillText(
-      game.gameState.score2.toString(),
-      (props.gameWidth * 3) / 4,
-      30,
-    );
+    ctx.textBaseline = "top";
+    game.gameState.players.forEach((player, index) => {
+      const scoreX =
+        index === 0 ? props.gameWidth / 4 : (props.gameWidth * 3) / 4;
+      ctx.fillText(player.score.toString(), scoreX, 30);
+    });
+    ctx.restore();
   };
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (!gameStarted) return;
 
-    const PADDLE_SPEED = 10;
-
     if (e.key === "ArrowUp") {
-      socketRef.current?.emit("updatePosition", -PADDLE_SPEED);
+      socketRef.current?.emit("updatePosition", { dir: -1 });
     } else if (e.key === "ArrowDown") {
-      socketRef.current?.emit("updatePosition", PADDLE_SPEED);
+      socketRef.current?.emit("updatePosition", { dir: 1 });
     }
   };
 
@@ -103,6 +210,7 @@ const PongRemoteMP = (props: gameProps) => {
       {gameStarted && (
         <div>
           <div> Game Mode: {gameMode} </div>
+          {disconnectMessage && <div>{disconnectMessage}</div>}
           <canvas
             ref={canvasRef}
             width={props.gameWidth}
@@ -112,7 +220,7 @@ const PongRemoteMP = (props: gameProps) => {
       )}
       {gameOver && (
         <div>
-          <h2>Player: {winner}, wins!</h2>
+          <h2>{disconnectMessage || `Player: ${winner}, wins!`}</h2>
           <button onClick={() => window.location.reload()}>Play Again</button>
         </div>
       )}

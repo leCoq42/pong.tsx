@@ -23,10 +23,10 @@ const PongSingle = (props: gameProps) => {
       dirY: Math.random() > 0.5 ? 1 : -1,
       speed: BALL_SPEED,
     },
-    paddle1Y: props.gameHeight / 2 - PADDLE_MID,
-    paddle2Y: props.gameHeight / 2 - PADDLE_MID,
-    score1: 0,
-    score2: 0,
+    players: [
+      { score: 0, position: props.gameHeight / 2 - PADDLE_MID },
+      { score: 0, position: props.gameHeight / 2 - PADDLE_MID },
+    ],
   });
 
   const [gameStart, setGameStart] = useState(false);
@@ -46,10 +46,10 @@ const PongSingle = (props: gameProps) => {
         dirY: Math.random() > 0.5 ? 1 : -1,
         speed: BALL_SPEED,
       },
-      paddle1Y: gameStateRef.current.paddle1Y,
-      paddle2Y: gameStateRef.current.paddle2Y,
-      score1: 0,
-      score2: 0,
+      players: [
+        { score: 0, position: props.gameHeight / 2 - PADDLE_MID },
+        { score: 0, position: props.gameHeight / 2 - PADDLE_MID },
+      ],
     };
     setGameOver(false);
     setWinner(null);
@@ -134,18 +134,12 @@ const PongSingle = (props: gameProps) => {
 
       const gameState = gameStateRef.current;
 
-      movePlayerPaddle(
-        "ArrowUp",
-        "ArrowDown",
-        gameState.paddle1Y,
-        (y) => (gameState.paddle1Y = y),
-        canvas,
-      );
+      movePlayerPaddle("ArrowUp", "ArrowDown", 0, canvas);
 
       moveAiPaddle(
-        gameState.paddle2Y,
+        gameState.players[1].position,
         gameState.ball.y,
-        (y) => (gameState.paddle2Y = y),
+        (y) => (gameState.players[1].position = y),
         canvas,
       );
 
@@ -156,8 +150,6 @@ const PongSingle = (props: gameProps) => {
       let newBallDirX = gameState.ball.dirX;
       let newBallDirY = gameState.ball.dirY;
       let newBallSpeed = gameState.ball.speed;
-      let newScore1 = gameState.score1;
-      let newScore2 = gameState.score2;
 
       if (newBallY <= 0 || newBallY >= canvas.height - BALL_SIZE) {
         newBallSpeed = newBallSpeed * BALL_ACCELERATION;
@@ -167,67 +159,71 @@ const PongSingle = (props: gameProps) => {
       // Paddle collision Player1
       if (
         newBallX <= PADDLE_WIDTH &&
-        newBallY + BALL_SIZE >= gameState.paddle1Y &&
-        newBallY <= gameState.paddle1Y + PADDLE_HEIGHT
+        newBallY + BALL_SIZE >= gameState.players[0].position &&
+        newBallY <= gameState.players[0].position + PADDLE_HEIGHT
       ) {
-        newBallSpeed = newBallSpeed * BALL_ACCELERATION;
         newBallDirX = -newBallDirX;
+        newBallSpeed = newBallSpeed * BALL_ACCELERATION;
       }
       // Paddle collision Player2
       if (
         newBallX >= canvas.width - PADDLE_WIDTH - BALL_SIZE &&
-        newBallY + BALL_SIZE >= gameState.paddle2Y &&
-        newBallY <= gameState.paddle2Y + PADDLE_HEIGHT
+        newBallY + BALL_SIZE >= gameState.players[1].position &&
+        newBallY <= gameState.players[1].position + PADDLE_HEIGHT
       ) {
-        newBallSpeed = newBallSpeed * BALL_ACCELERATION;
         newBallDirX = -newBallDirX;
+        newBallSpeed = newBallSpeed * BALL_ACCELERATION;
       }
 
       //Register Score Player 1
       if (newBallX >= canvas.width - BALL_SIZE) {
-        newScore1++;
+        gameStateRef.current.players[0].score++;
         newBallX = canvas.width / 2;
         newBallY = canvas.height / 2;
+        newBallDirX = Math.random() > 0.5 ? 1 : -1;
+        newBallDirY = Math.random() > 0.5 ? 1 : -1;
         newBallSpeed = BALL_SPEED;
       }
       //Register Score Player 2
       if (newBallX <= 0) {
-        newScore2++;
+        gameStateRef.current.players[0].score++;
         newBallX = canvas.width / 2;
         newBallY = canvas.height / 2;
+        newBallDirX = Math.random() > 0.5 ? 1 : -1;
+        newBallDirY = Math.random() > 0.5 ? 1 : -1;
         newBallSpeed = BALL_SPEED;
       }
 
       // Register winner
-      if (newScore1 >= WIN_SCORE) {
+      if (gameState.players[0].score >= WIN_SCORE) {
         setGameOver(true);
         setWinner("Player 1");
-      } else if (newScore2 >= WIN_SCORE) {
+      } else if (gameState.players[1].score >= WIN_SCORE) {
         setGameOver(true);
         setWinner("Player 2");
       }
 
-      gameStateRef.current = {
-        ...gameState,
-        ball: {
-          x: newBallX,
-          y: newBallY,
-          speed: newBallSpeed,
-          dirX: newBallDirX,
-          dirY: newBallDirY,
-        },
-        score1: newScore1,
-        score2: newScore2,
+      gameStateRef.current.ball = {
+        x: newBallX,
+        y: newBallY,
+        speed: newBallSpeed,
+        dirX: newBallDirX,
+        dirY: newBallDirY,
       };
 
       context.fillStyle = "black";
       context.fillRect(0, 0, canvas.width, canvas.height);
 
       context.fillStyle = "white";
-      context.fillRect(0, gameState.paddle1Y, PADDLE_WIDTH, PADDLE_HEIGHT);
+      context.fillRect(
+        0,
+        gameState.players[0].position,
+        PADDLE_WIDTH,
+        PADDLE_HEIGHT,
+      );
       context.fillRect(
         canvas.width - PADDLE_WIDTH,
-        gameState.paddle2Y,
+        gameState.players[1].position,
         PADDLE_WIDTH,
         PADDLE_HEIGHT,
       );
@@ -240,8 +236,16 @@ const PongSingle = (props: gameProps) => {
       );
 
       context.font = "30px Arial";
-      context.fillText(gameState.score1.toString(), canvas.width / 4, 30);
-      context.fillText(gameState.score2.toString(), (canvas.width * 3) / 4, 30);
+      context.fillText(
+        gameState.players[0].score.toString(),
+        canvas.width / 4,
+        30,
+      );
+      context.fillText(
+        gameState.players[1].score.toString(),
+        (canvas.width * 3) / 4,
+        30,
+      );
 
       context.setLineDash([5, 15]);
       context.beginPath();

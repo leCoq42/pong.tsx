@@ -5,4 +5,4 @@ export const createGameID = customAlphabet(
   6,
 );
 
-export const createLobbyID = () => nanoid();
+export const createLobbyID = () => nanoid(16);
