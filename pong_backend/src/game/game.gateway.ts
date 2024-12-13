@@ -61,55 +61,83 @@ export class GameGateway implements OnGatewayDisconnect {
   }
 
   @SubscribeMessage('joinQueue')
-  handleJoinQueue(client: Socket) {
-    this.matchmakingQueue.push(client);
-    if (this.matchmakingQueue.length >= 2) {
-      const player1 = this.matchmakingQueue.shift();
-      const player2 = this.matchmakingQueue.shift();
-      this.startGame(player1, player2);
+  handleJoinQueue(
+    client: Socket,
+    mode: 'local-mp' | 'remote-mp' | 'singleplayer',
+  ) {
+    try {
+      this.logger.log(`Player ${client.id} joined queue for mode: ${mode}`);
+
+      if (mode === 'singleplayer') {
+        this.handleSingleplayer(client);
+      } else if (mode === 'local-mp') {
+        this.handleLocalMultiplayer(client);
+      } else {
+        this.matchmakingQueue.push(client);
+        if (this.matchmakingQueue.length >= 2) {
+          const player1 = this.matchmakingQueue.shift();
+          const player2 = this.matchmakingQueue.shift();
+          this.handleRemoteMultiplayer(player1, player2, mode);
+        }
+      }
+    } catch (error) {
+      this.logger.error(`Error joining queue: ${error}`);
     }
   }
 
-  @SubscribeMessage('startSinglePlayer')
-  handleSinglePlayerGame(client: Socket) {
-    const gameId = this.gameService.createGame([client.id], 'singleplayer');
-    client.emit('gameStarted', { gameId, mode: 'singleplayer' });
+  @SubscribeMessage('rematch')
+  handleRematch(
+    client: Socket,
+    mode: 'local-mp' | 'remote-mp' | 'singleplayer',
+  ) {
+    this.handleJoinQueue(client, mode);
   }
 
   @SubscribeMessage('updatePosition')
-  handleUpdatePosition(client: Socket, payload: { dir: number }) {
+  handleUpdatePosition(
+    client: Socket,
+    payload: { dir: number; player?: number },
+  ) {
     const gameId = this.gameService.getGameIdByPlayerId(client.id);
     if (!gameId) return;
 
     const game = this.gameService.getGameRoom(gameId);
     if (!game) return;
 
-    const playerIndex = game.clients.findIndex((p) => p.id === client.id);
-    if (playerIndex === -1) return;
+    let playerIdx: number;
 
-    const currentPosition = game.gameState.players[playerIndex].position;
+    if (game.mode === 'local-mp') {
+      playerIdx = payload.player === 2 ? 1 : 0;
+    } else {
+      playerIdx = game.clients.findIndex((p) => p.id === client.id);
+    }
+
+    if (playerIdx === -1) return;
+
+    const currentPosition = game.gameState.players[playerIdx].position;
     const newPosition =
       currentPosition + game.gameConstants.PADDLE_SPEED * payload.dir;
     const maxPosition =
       game.gameConstants.CANVAS_HEIGHT - game.gameConstants.PADDLE_HEIGHT;
     const finalPosition = Math.max(0, Math.min(newPosition, maxPosition));
 
-    this.gameService.updatePlayerPosition(gameId, client.id, finalPosition);
+    this.gameService.updatePlayerPosition(gameId, playerIdx, finalPosition);
   }
 
-  private startGame(player1: Socket, player2: Socket) {
-    const gameId = this.gameService.createGame(
-      [player1.id, player2.id],
-      'multiplayer',
-    );
+  private handleRemoteMultiplayer(
+    player1: Socket,
+    player2: Socket,
+    mode: 'local-mp' | 'remote-mp',
+  ) {
+    const gameId = this.gameService.createGame([player1.id, player2.id], mode);
 
     player1.join(gameId);
     player2.join(gameId);
 
     const game = this.gameService.getGameRoom(gameId);
 
-    player1.emit('gameStarted', { gameId, mode: 'multiplayer', game });
-    player2.emit('gameStarted', { gameId, mode: 'multiplayer', game });
+    player1.emit('gameStarted', { gameId, game });
+    player2.emit('gameStarted', { gameId, game });
 
     const gameInterval = setInterval(() => {
       const currentGame = this.gameService.getGameRoom(gameId);
@@ -128,6 +156,56 @@ export class GameGateway implements OnGatewayDisconnect {
       this.gameService.updateGameState(gameId);
       this.server.to(gameId).emit('gameState', currentGame);
     }, SERVER_TICK_RATE);
+  }
+
+  private handleLocalMultiplayer(client: Socket) {
+    try {
+      const gameId = this.gameService.createGame(
+        [client.id, 'player2'],
+        'local-mp',
+      );
+
+      client.join(gameId);
+      const game = this.gameService.getGameRoom(gameId);
+
+      client.emit('gameStarted', { gameId, game });
+
+      const gameInterval = setInterval(() => {
+        const currentGame = this.gameService.getGameRoom(gameId);
+        if (!currentGame || !currentGame.isActive) {
+          clearInterval(gameInterval);
+          return;
+        }
+        this.gameService.updateGameState(gameId);
+        this.server.to(gameId).emit('gameState', currentGame);
+      }, SERVER_TICK_RATE);
+      this.gameLoops.set(gameId, gameInterval);
+    } catch (error) {
+      this.logger.error(`Error in handleLocalMultiplayer game: ${error}`);
+    }
+  }
+
+  private handleSingleplayer(client: Socket) {
+    try {
+      const gameId = this.gameService.createGame([client.id], 'singleplayer');
+      client.join(gameId);
+
+      const game = this.gameService.getGameRoom(gameId);
+      client.emit('gameStarted', { gameId, game });
+
+      const gameInterval = setInterval(() => {
+        const currentGame = this.gameService.getGameRoom(gameId);
+        if (!currentGame || !currentGame.isActive) {
+          clearInterval(gameInterval);
+          return;
+        }
+
+        this.gameService.updateGameState(gameId);
+        this.server.to(gameId).emit('gameState', currentGame);
+      }, SERVER_TICK_RATE);
+    } catch (error) {
+      this.logger.error(`Error in handleSingleplayer: ${error}`);
+    }
   }
 
   private handleGameOver(gameId: string, game: GameRoom) {

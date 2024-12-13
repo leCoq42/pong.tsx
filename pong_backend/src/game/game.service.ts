@@ -8,6 +8,7 @@ import {
   Ball,
 } from '../../../shared/types';
 import { Logger } from '@nestjs/common';
+import { idText } from 'typescript';
 
 const SERVER_TICK_RATE = 1000 / 120;
 
@@ -32,24 +33,39 @@ export class GameService {
 
   createGame(
     playerIds: string[],
-    mode: 'singleplayer' | 'multiplayer',
+    mode: 'singleplayer' | 'local-mp' | 'remote-mp',
   ): string {
     const gameId = uuid();
     const initialGameState = this.createInitialGameState();
 
-    const clients: Client[] = playerIds.map((id) => ({
-      id,
-    }));
+    const clients: Client[] = [];
+    if (mode === 'singleplayer') {
+      clients.push({ id: playerIds[0] }, { id: 'bot' });
+    } else if (mode === 'local-mp') {
+      clients.push({ id: playerIds[0] }, { id: 'player2' });
+    } else {
+      clients.push({ id: playerIds[0] }, { id: playerIds[1] });
+    }
 
-    const players: Player[] = playerIds.map(() => ({
-      score: 0,
-      position: this.DEFAULT_GAME_CONSTANTS.CANVAS_HEIGHT / 2,
-    }));
+    const players: Player[] = [
+      {
+        score: 0,
+        position:
+          this.DEFAULT_GAME_CONSTANTS.CANVAS_HEIGHT / 2 -
+          this.DEFAULT_GAME_CONSTANTS.PADDLE_HEIGHT / 2,
+      },
+      {
+        score: 0,
+        position:
+          this.DEFAULT_GAME_CONSTANTS.CANVAS_HEIGHT / 2 -
+          this.DEFAULT_GAME_CONSTANTS.PADDLE_HEIGHT / 2,
+      },
+    ];
 
     const gameRoom: GameRoom = {
       gameId,
       clients,
-      mode,
+      mode: mode,
       isActive: true,
       isFinished: false,
       gameState: { ball: initialGameState.ball, players },
@@ -67,8 +83,12 @@ export class GameService {
 
   private createInitialGameState(): GameState {
     const ball: Ball = {
-      x: this.DEFAULT_GAME_CONSTANTS.CANVAS_WIDTH / 2,
-      y: this.DEFAULT_GAME_CONSTANTS.CANVAS_HEIGHT / 2,
+      x:
+        this.DEFAULT_GAME_CONSTANTS.CANVAS_WIDTH / 2 -
+        this.DEFAULT_GAME_CONSTANTS.BALL_SIZE / 2,
+      y:
+        this.DEFAULT_GAME_CONSTANTS.CANVAS_HEIGHT / 2 -
+        this.DEFAULT_GAME_CONSTANTS.BALL_SIZE / 2,
       dirX: Math.random() > 0.5 ? 1 : -1,
       dirY: Math.random() > 0.5 ? 1 : -1,
       speed: this.DEFAULT_GAME_CONSTANTS.BALL_SPEED,
@@ -89,6 +109,10 @@ export class GameService {
         game.gameState.ball.speed * game.gameState.ball.dirX;
       game.gameState.ball.y +=
         game.gameState.ball.speed * game.gameState.ball.dirY;
+
+      if (game.mode === 'singleplayer') {
+        this.updateAIPosition(game);
+      }
 
       this.handleCollisions(game);
       this.checkScore(game);
@@ -174,21 +198,44 @@ export class GameService {
 
   updatePlayerPosition(
     gameId: string,
-    playerId: string,
+    playerIdx: number,
     newPosition: number,
   ): void {
     const game = this.rooms.get(gameId);
     if (!game) return;
 
-    const playerIdx = game.clients.findIndex(
-      (player) => player.id === playerId,
-    );
-    if (playerIdx != -1) {
+    if (playerIdx >= 0 && playerIdx < game.gameState.players.length) {
       const maxPosition =
         game.gameConstants.CANVAS_HEIGHT - game.gameConstants.PADDLE_HEIGHT;
       game.gameState.players[playerIdx].position = Math.max(
         0,
         Math.min(newPosition, maxPosition),
+      );
+    }
+  }
+
+  private updateAIPosition(game: GameRoom): void {
+    const aiPlayerIdx = 1;
+    const ballY = game.gameState.ball.y;
+    const paddleY = game.gameState.players[aiPlayerIdx].position;
+    const paddleHeight = game.gameConstants.PADDLE_HEIGHT;
+    const paddleCenter = paddleY + paddleHeight / 2;
+    const ballCenter = ballY + game.gameConstants.BALL_SIZE / 2;
+
+    if (Math.abs(paddleCenter - ballCenter) > game.gameConstants.PADDLE_SPEED) {
+      if (paddleCenter < ballY) {
+        game.gameState.players[aiPlayerIdx].position +=
+          game.gameConstants.PADDLE_SPEED;
+      } else {
+        game.gameState.players[aiPlayerIdx].position -=
+          game.gameConstants.PADDLE_SPEED;
+      }
+
+      const maxPosition =
+        game.gameConstants.CANVAS_HEIGHT - game.gameConstants.PADDLE_HEIGHT;
+      game.gameState.players[aiPlayerIdx].position = Math.max(
+        0,
+        Math.min(game.gameState.players[aiPlayerIdx].position, maxPosition),
       );
     }
   }
@@ -275,7 +322,7 @@ export class GameService {
 
     if (playerIdx === -1 || opponentIdx === -1) return undefined;
 
-    if (game.mode === 'multiplayer') {
+    if (game.mode === 'local-mp' || game.mode === 'remote-mp') {
       game.isActive = false;
       game.isFinished = true;
       game.winner = game.clients[opponentIdx].id;

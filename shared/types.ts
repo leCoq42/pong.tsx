@@ -29,7 +29,7 @@ export type ServerPayloads = {
 export interface GameRoom {
   gameId: string;
   clients: Client[];
-  mode: "singleplayer" | "multiplayer";
+  mode: "singleplayer" | "local-mp" | "remote-mp";
   isActive: boolean;
   isFinished: boolean;
   gameState: GameState;

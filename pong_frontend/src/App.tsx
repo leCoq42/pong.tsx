@@ -1,12 +1,10 @@
 import "./App.css";
 import { Routes, Route } from "react-router-dom";
-import React, { Suspense, lazy } from "react";
+import { Suspense, lazy } from "react";
 import NavBar from "./components/NavBar";
 
 const PongLanding = lazy(() => import("./components/PongLanding"));
-const PongRemoteMP = lazy(() => import("./components/PongRemoteMP"));
-const PongLocalMult = lazy(() => import("./components/PongLocalMult"));
-const PongSingle = lazy(() => import("./components/PongSingle"));
+const Pong = lazy(() => import("./components/Pong"));
 
 function App() {
   return (
@@ -14,27 +12,25 @@ function App() {
       <NavBar />
       <Suspense fallback={<div>Loading...</div>}>
         <Routes>
-          <Route
-            index
-            path="/"
-            element={<PongRemoteMP gameWidth={800} gameHeight={600} />}
-          />
+          <Route index path="/" />
           <Route path="game" element={<PongLanding />}>
             <Route
               path="local-mp"
-              element={<PongLocalMult gameWidth={800} gameHeight={600} />}
+              element={
+                <Pong gameWidth={800} gameHeight={600} mode="local-mp" />
+              }
             />
             <Route
               path="remote-mp"
-              element={<PongRemoteMP gameWidth={800} gameHeight={600} />}
+              element={
+                <Pong gameWidth={800} gameHeight={600} mode="remote-mp" />
+              }
             />
             <Route
               path="singleplayer"
-              element={<PongSingle gameWidth={800} gameHeight={600} />}
-            />
-            <Route
-              path="*"
-              element={<PongRemoteMP gameWidth={800} gameHeight={600} />}
+              element={
+                <Pong gameWidth={800} gameHeight={600} mode="singleplayer" />
+              }
             />
           </Route>
         </Routes>
