@@ -15,13 +15,20 @@ const Pong = (props: gameProps) => {
   const [gameStarted, setGameStarted] = useState(false);
   const [gameOver, setGameOver] = useState(false);
   const [winner, setWinner] = useState<string | null>(null);
-  const [disconnectMessage, setDisconnectMessage] = useState<string>("");
-  const [previousGameState, setPreviousGameState] = useState<GameRoom | null>(
-    null,
-  );
+
   const [currentGameState, setCurrentGameState] = useState<GameRoom | null>(
-    null,
+    null
   );
+  const [previousGameState, setPreviousGameState] = useState<GameRoom | null>(
+    null
+  );
+  const [queuePosition, setQueuePosition] = useState(0);
+  const [isMatchmaking, setIsMatchmaking] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(true);
+  const [isPaused, setIsPaused] = useState(false);
+  const [connectionError, setConnectionError] = useState<string>("");
+  const [disconnectMessage, setDisconnectMessage] = useState<string>("");
+  const [reconnectAvailable, setReconnectAvailable] = useState(false);
   const lastUpdateTime = useRef<number>(0);
   const animationFrameRef = useRef<number>();
 
@@ -30,8 +37,18 @@ const Pong = (props: gameProps) => {
     setGameOver(false);
     setWinner(null);
     setDisconnectMessage("");
-    socketRef.current?.emit("joinQueue", props.mode);
+    socketRef.current?.emit("startGame", props.mode);
   }, [props.mode]);
+
+  const handleStartdMatchmaking = useCallback(() => {
+    setIsMatchmaking(true);
+    socketRef.current?.emit("joinMatchmaking");
+  }, []);
+
+  const handleCancelMatchmaking = useCallback(() => {
+    socketRef.current?.emit("leaveMatchmaking");
+    setIsMatchmaking(false);
+  }, []);
 
   const handleRematch = useCallback(() => {
     setGameStarted(true);
@@ -40,6 +57,13 @@ const Pong = (props: gameProps) => {
     setDisconnectMessage("");
     socketRef.current?.emit("rematch", { mode: props.mode });
   }, [props.mode]);
+
+  useEffect(() => {
+    const storedGameId = localStorage.getItem("disconnectedGameId");
+    if (storedGameId) {
+      setReconnectAvailable(true);
+    }
+  }, []);
 
   useEffect(() => {
     socketRef.current = io("http://localhost:3000/game", {
@@ -51,26 +75,74 @@ const Pong = (props: gameProps) => {
 
     socket.on("connect", () => {
       console.log("Connected to server");
+      setIsConnecting(false);
+      setConnectionError("");
       connectedRef.current = true;
-    });
-
-    socket.on("gameState", (gameState) => {
-      // console.log("Received game state:", gameState);
-      setPreviousGameState(currentGameState);
-      setCurrentGameState(gameState);
-      lastUpdateTime.current = performance.now();
+      const storedGameId = localStorage.getItem("disconnectedGameId");
+      if (storedGameId) {
+        setReconnectAvailable(true);
+      }
     });
 
     socket.on(
-      "playerDisconnected",
+      "playerReconnected",
       (data: { playerId: string; gameState: GameRoom }) => {
-        console.log("Opponent disconnected", data);
-        if (data && data.gameState) {
-          updateCanvas(data.gameState);
-        }
-        setDisconnectMessage("Opponent disconnected");
-      },
+        setIsPaused(false);
+        setDisconnectMessage("");
+        setCurrentGameState(data.gameState);
+        localStorage.removeItem("disconnectedGameId");
+        setReconnectAvailable(false);
+      }
     );
+
+    socket.on("canReconnect", (data: { gameId: string }) => {
+      setReconnectAvailable(true);
+      localStorage.setItem("gameId", data.gameId);
+    });
+
+    socket.on("connect_error", (error) => {
+      setIsConnecting(false);
+      setConnectionError("Failed to connect to game server");
+      console.error("Connection error:", error);
+    });
+
+    socket.on(
+      "opponentDisconnected",
+      (data: { playerId: string; gameState: GameRoom }) => {
+        if (data.gameState.isPaused) {
+          setIsPaused(true);
+          if (data.playerId === socket.id) {
+            localStorage.setItem("disconnectedGameId", data.gameState.gameId);
+            setReconnectAvailable(true);
+            setDisconnectMessage(
+              "You're disconnected. Click reconnect to rejoin the game."
+            );
+          } else {
+            setDisconnectMessage(
+              "Opponent disconnected. Waiting for reconnection..."
+            );
+          }
+        }
+        updateCanvas(data.gameState);
+      }
+    );
+
+    socket.on(
+      "matchmakingStatus",
+      (data: { status: string; positition?: number; length?: number }) => {
+        if (data.status === "waiting") {
+          setQueuePosition(data.positition || 0);
+        } else if (data.status === "left") {
+          setIsMatchmaking(false);
+          setQueuePosition(0);
+        }
+      }
+    );
+
+    socket.on("matchmakingError", (data: { message: string }) => {
+      setConnectionError(data.message);
+      setIsMatchmaking(false);
+    });
 
     socket.on("gameStarted", (data: { gameId: string; game: GameRoom }) => {
       console.log("Game started:", data);
@@ -79,6 +151,14 @@ const Pong = (props: gameProps) => {
       setPreviousGameState(data.game);
       setCurrentGameState(data.game);
       lastUpdateTime.current = performance.now();
+      // Store gameId when game starts
+      localStorage.setItem("gameId", data.gameId);
+    });
+
+    socket.on("gameState", (gameState) => {
+      setPreviousGameState(currentGameState);
+      setCurrentGameState(gameState);
+      lastUpdateTime.current = performance.now();
     });
 
     socket.on("gameOver", (data: { winner: string; reason: string }) => {
@@ -86,16 +166,30 @@ const Pong = (props: gameProps) => {
       setGameStarted(false);
       setGameOver(true);
       setWinner(data.winner);
-      if (data.reason === "disconnection") {
-        setDisconnectMessage(
-          `Opponent disconnected, Player ${data.winner} wins!`,
-        );
+      setIsPaused(false);
+      localStorage.removeItem("gameId");
+      localStorage.removeItem("disconnectedGameId");
+      setReconnectAvailable(false);
+
+      let message = `Player ${data.winner} wins!`;
+      if (data.reason === "timeout") {
+        message = `Opponent failed to reconnect. Player ${data.winner} wins!`;
+      } else if (data.reason === "disconnection") {
+        message = `Opponent disconnected. Player ${data.winner} wins!`;
       }
+      setDisconnectMessage(message);
     });
 
     return () => {
-      socket.disconnect();
+      socket?.off("matchmakingStatus");
+      socket?.off("matchmakingError");
     };
+  }, []);
+
+  const handleReconnect = useCallback(() => {
+    if (!socketRef.current) return;
+    socketRef.current.emit("reconnectToGame");
+    setReconnectAvailable(false);
   }, []);
 
   const updateCanvas = useCallback((game: GameRoom) => {
@@ -135,7 +229,7 @@ const Pong = (props: gameProps) => {
         paddleX,
         player.position,
         game.gameConstants.PADDLE_WIDTH,
-        game.gameConstants.PADDLE_HEIGHT,
+        game.gameConstants.PADDLE_HEIGHT
       );
     });
 
@@ -143,7 +237,7 @@ const Pong = (props: gameProps) => {
       game.gameState.ball.x,
       game.gameState.ball.y,
       game.gameConstants.BALL_SIZE,
-      game.gameConstants.BALL_SIZE,
+      game.gameConstants.BALL_SIZE
     );
 
     context.font = "30px Arial";
@@ -153,6 +247,13 @@ const Pong = (props: gameProps) => {
       const scoreX = idx === 0 ? canvas.width / 4 : (canvas.width * 3) / 4;
       context.fillText(player.score.toString(), scoreX, 30);
     });
+
+    if (game.isPaused) {
+      context.font = "30px Arial";
+      context.fillStyle = "white";
+      context.textAlign = "center";
+      context.fillText("Game Paused", canvas.width / 2, canvas.height / 2);
+    }
   }, []);
 
   useEffect(() => {
@@ -162,7 +263,7 @@ const Pong = (props: gameProps) => {
           const timeSinceUpdate = timestamp - lastUpdateTime.current;
           const interpolationFactor = Math.min(
             timeSinceUpdate / (1000 / 60),
-            1,
+            1
           );
 
           const interpolatedState = {
@@ -173,12 +274,12 @@ const Pong = (props: gameProps) => {
                 x: lerp(
                   previousGameState.gameState.ball.x,
                   currentGameState.gameState.ball.x,
-                  interpolationFactor,
+                  interpolationFactor
                 ),
                 y: lerp(
                   previousGameState.gameState.ball.y,
                   currentGameState.gameState.ball.y,
-                  interpolationFactor,
+                  interpolationFactor
                 ),
               },
               players: currentGameState.gameState.players.map(
@@ -187,9 +288,9 @@ const Pong = (props: gameProps) => {
                   position: lerp(
                     previousGameState.gameState.players[idx].position,
                     player.position,
-                    interpolationFactor,
+                    interpolationFactor
                   ),
-                }),
+                })
               ),
             },
           };
@@ -233,7 +334,7 @@ const Pong = (props: gameProps) => {
         }
       }
     },
-    [gameStarted, props.mode],
+    [gameStarted, props.mode]
   );
 
   useEffect(() => {
@@ -243,9 +344,18 @@ const Pong = (props: gameProps) => {
     };
   }, [handleKeyDown]);
 
+  if (connectionError) {
+    return <div className="text-red-500">{connectionError}</div>;
+  }
+
+  if (isConnecting) {
+    return <div>Connecting to game server...</div>;
+  }
+
   return (
     <div className="flex flex-col items-center gap-4">
       <div className="text-lg font-bold">Pong</div>
+
       <div className="text-sm mb-2">
         {props.mode === "local-mp" &&
           "Player 1: W/S | Player 2: Up/Down arrow keys"}
@@ -253,13 +363,35 @@ const Pong = (props: gameProps) => {
         {props.mode === "singleplayer" &&
           "Player 1: Up/Down arrow keys | Player 2: computer"}
       </div>
-      {!gameStarted && (
+      {props.mode != "remote-mp" && !gameStarted && (
         <button
           onClick={handleStart}
           className="px-4 mt-2 py-2 bg-green-500 text-white rounded"
         >
           Start Game
         </button>
+      )}
+      {props.mode === "remote-mp" && !gameStarted && (
+        <div>
+          {!isMatchmaking ? (
+            <button
+              onClick={handleStartdMatchmaking}
+              className="px-4 py-2 bg-blue-500 text-white rounded"
+            >
+              Find Match
+            </button>
+          ) : (
+            <div className="text-center">
+              <div>Finding match... Position in queue: {queuePosition}</div>
+              <button
+                onClick={handleCancelMatchmaking}
+                className="px-4 py-2 mt-2 bg-red-500 text-white rounded"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
       )}
       {gameStarted && (
         <canvas
@@ -281,6 +413,15 @@ const Pong = (props: gameProps) => {
             Rematch
           </button>
         </div>
+      )}
+      {isPaused && disconnectMessage && (
+        <div className="game-message">{disconnectMessage}</div>
+      )}
+
+      {reconnectAvailable && (
+        <button className="game-button" onClick={handleReconnect}>
+          Reconnect to Game
+        </button>
       )}
     </div>
   );

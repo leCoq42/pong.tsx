@@ -8,7 +8,6 @@ import {
   Ball,
 } from '../../../shared/types';
 import { Logger } from '@nestjs/common';
-import { idText } from 'typescript';
 
 const SERVER_TICK_RATE = 1000 / 120;
 
@@ -18,6 +17,11 @@ export class GameService {
   private playerGameMap: Map<string, string> = new Map();
   private gameLoops: Map<string, NodeJS.Timeout> = new Map();
   private readonly logger = new Logger(GameService.name);
+  readonly RECONNECT_TIMEOUT = 5000; // Make this public
+  private disconnectedPlayers: Map<
+    string,
+    { gameId: string; timestamp: number }
+  > = new Map();
 
   private readonly DEFAULT_GAME_CONSTANTS = {
     PADDLE_HEIGHT: 100,
@@ -323,21 +327,91 @@ export class GameService {
     if (playerIdx === -1 || opponentIdx === -1) return undefined;
 
     if (game.mode === 'local-mp' || game.mode === 'remote-mp') {
-      game.isActive = false;
-      game.isFinished = true;
-      game.winner = game.clients[opponentIdx].id;
+      if (!game.isFinished) {
+        // Store disconnected player info with timestamp
+        this.disconnectedPlayers.set(playerId, {
+          gameId,
+          timestamp: Date.now(),
+        });
 
-      this.rooms.set(gameId, game);
+        // Set game to paused instead of finished
+        game.isActive = false;
+        game.isPaused = true;
+        this.rooms.set(gameId, game);
 
-      setTimeout(() => {
+        // Schedule cleanup if player doesn't reconnect
+        setTimeout(() => {
+          this.handleReconnectTimeout(gameId, playerId);
+        }, this.RECONNECT_TIMEOUT);
+
+        return game;
+      } else {
+        // Normal cleanup for finished games
         this.cleanUpGame(gameId);
-      }, 5000);
-
-      return game;
+      }
     } else if (game.mode === 'singleplayer') {
       this.cleanUpGame(gameId);
-      return undefined;
     }
     return undefined;
+  }
+
+  handleReconnectTimeout(gameId: string, playerId: string) {
+    const disconnectedInfo = this.disconnectedPlayers.get(playerId);
+    if (!disconnectedInfo || disconnectedInfo.gameId !== gameId) return;
+
+    const game = this.rooms.get(gameId);
+    if (!game) return;
+
+    // Set the remaining player as winner
+    this.disconnectedPlayers.delete(playerId);
+    game.isActive = false;
+    game.isFinished = true;
+    game.isPaused = false;
+    game.winner = game.clients.find((c) => c.id !== playerId)?.id;
+    
+    this.rooms.set(gameId, game);
+    
+    return game;
+  }
+
+  handleReconnect(playerId: string): GameRoom | undefined {
+    const disconnectedInfo = this.disconnectedPlayers.get(playerId);
+    if (!disconnectedInfo) return undefined;
+
+    const game = this.rooms.get(disconnectedInfo.gameId);
+    if (!game || game.isFinished) return undefined;
+
+    // Remove from disconnected players list
+    this.disconnectedPlayers.delete(playerId);
+
+    // Resume the game
+    game.isActive = true;
+    game.isPaused = false;
+    this.rooms.set(disconnectedInfo.gameId, game);
+
+    return game;
+  }
+
+  getDisconnectedPlayerInfo(playerId: string) {
+    const info = this.disconnectedPlayers.get(playerId);
+    if (!info) return null;
+    
+    // Verify the game still exists and is in a reconnectable state
+    const game = this.rooms.get(info.gameId);
+    if (!game || game.isFinished) {
+      this.disconnectedPlayers.delete(playerId);
+      return null;
+    }
+    
+    return info;
+  }
+
+  onModuleDestroy() {
+    for (const [gameId] of this.rooms) {
+      this.cleanUpGame(gameId);
+    }
+    this.rooms.clear();
+    this.playerGameMap.clear();
+    this.gameLoops.clear();
   }
 }

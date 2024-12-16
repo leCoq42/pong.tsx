@@ -19,9 +19,9 @@ const SERVER_TICK_RATE = 1000 / 60;
 })
 export class GameGateway implements OnGatewayDisconnect {
   @WebSocketServer() server: Server;
+  private readonly logger = new Logger(GameGateway.name);
   private matchmakingQueue: Socket[] = [];
   private gameLoops: Map<string, NodeJS.Timeout> = new Map();
-  private readonly logger = new Logger(GameGateway.name);
 
   constructor(private gameService: GameService) {}
 
@@ -31,11 +31,17 @@ export class GameGateway implements OnGatewayDisconnect {
 
   handleConnection(client: Socket) {
     this.logger.log('Client connected: ' + client.id);
+    const disconnectedInfo = this.gameService.getDisconnectedPlayerInfo(
+      client.id,
+    );
+    if (disconnectedInfo) {
+      client.emit('canReconnect', { gameId: disconnectedInfo.gameId });
+    }
   }
 
   handleDisconnect(client: Socket) {
     try {
-      this.logger.log(`Client disconnected: ${client.id}`);
+      this.logger.log(`Opponent disconnected: ${client.id}`);
       this.removeFromQueue(client);
       const gameId = this.gameService.getGameIdByPlayerId(client.id);
       if (gameId) {
@@ -45,23 +51,37 @@ export class GameGateway implements OnGatewayDisconnect {
         );
 
         if (updatedGame) {
-          this.server.to(gameId).emit('playerDisconnected', {
+          this.server.to(gameId).emit('opponentDisconnected', {
             playerId: client.id,
             gameState: updatedGame,
           });
 
-          if (!updatedGame.isActive) {
-            this.handleGameOver(gameId, updatedGame);
+          if (this.gameLoops.has(gameId)) {
+            clearInterval(this.gameLoops.get(gameId));
+            this.gameLoops.delete(gameId);
           }
+
+          const timeoutId = setTimeout(() => {
+            const timeoutGame = this.gameService.handleReconnectTimeout(
+              gameId,
+              client.id,
+            );
+            if (timeoutGame) {
+              this.handleGameOver(gameId, timeoutGame);
+              this.gameLoops.delete(gameId);
+              this.gameService.removeGame(client.id);
+            }
+          }, this.gameService.RECONNECT_TIMEOUT);
+          this.gameLoops.set(gameId, timeoutId);
         }
       }
     } catch (e) {
-      this.logger.log(`Error on disconnect: ${e}`);
+      this.logger.error(`Error on disconnect: ${e}`);
     }
   }
 
-  @SubscribeMessage('joinQueue')
-  handleJoinQueue(
+  @SubscribeMessage('startGame')
+  handleStartGame(
     client: Socket,
     mode: 'local-mp' | 'remote-mp' | 'singleplayer',
   ) {
@@ -90,7 +110,7 @@ export class GameGateway implements OnGatewayDisconnect {
     client: Socket,
     mode: 'local-mp' | 'remote-mp' | 'singleplayer',
   ) {
-    this.handleJoinQueue(client, mode);
+    this.handleStartGame(client, mode);
   }
 
   @SubscribeMessage('updatePosition')
@@ -98,30 +118,69 @@ export class GameGateway implements OnGatewayDisconnect {
     client: Socket,
     payload: { dir: number; player?: number },
   ) {
-    const gameId = this.gameService.getGameIdByPlayerId(client.id);
-    if (!gameId) return;
+    try {
+      const gameId = this.gameService.getGameIdByPlayerId(client.id);
+      if (!gameId) return;
 
-    const game = this.gameService.getGameRoom(gameId);
-    if (!game) return;
+      const game = this.gameService.getGameRoom(gameId);
+      if (!game) return;
 
-    let playerIdx: number;
+      let playerIdx: number;
 
-    if (game.mode === 'local-mp') {
-      playerIdx = payload.player === 2 ? 1 : 0;
-    } else {
-      playerIdx = game.clients.findIndex((p) => p.id === client.id);
+      if (game.mode === 'local-mp') {
+        playerIdx = payload.player === 2 ? 1 : 0;
+      } else {
+        playerIdx = game.clients.findIndex((p) => p.id === client.id);
+      }
+
+      if (playerIdx === -1) return;
+
+      const currentPosition = game.gameState.players[playerIdx].position;
+      const newPosition =
+        currentPosition + game.gameConstants.PADDLE_SPEED * payload.dir;
+      const maxPosition =
+        game.gameConstants.CANVAS_HEIGHT - game.gameConstants.PADDLE_HEIGHT;
+      const finalPosition = Math.max(0, Math.min(newPosition, maxPosition));
+
+      this.gameService.updatePlayerPosition(gameId, playerIdx, finalPosition);
+    } catch (error) {
+      this.logger.error(`Error updating position: ${error}`);
     }
+  }
 
-    if (playerIdx === -1) return;
+  @SubscribeMessage('reconnectToGame')
+  handleReconnect(client: Socket) {
+    try {
+      const game = this.gameService.handleReconnect(client.id);
+      if (game) {
+        // Clear any existing timeout
+        if (this.gameLoops.has(game.gameId)) {
+          clearTimeout(this.gameLoops.get(game.gameId));
+          this.gameLoops.delete(game.gameId);
+        }
 
-    const currentPosition = game.gameState.players[playerIdx].position;
-    const newPosition =
-      currentPosition + game.gameConstants.PADDLE_SPEED * payload.dir;
-    const maxPosition =
-      game.gameConstants.CANVAS_HEIGHT - game.gameConstants.PADDLE_HEIGHT;
-    const finalPosition = Math.max(0, Math.min(newPosition, maxPosition));
+        client.join(game.gameId);
+        this.server.to(game.gameId).emit('playerReconnected', {
+          playerId: client.id,
+          gameState: game,
+        });
 
-    this.gameService.updatePlayerPosition(gameId, playerIdx, finalPosition);
+        // Restart game interval
+        const gameInterval = setInterval(() => {
+          const currentGame = this.gameService.getGameRoom(game.gameId);
+          if (!currentGame || !currentGame.isActive) {
+            clearInterval(gameInterval);
+            return;
+          }
+          this.gameService.updateGameState(game.gameId);
+          this.server.to(game.gameId).emit('gameState', currentGame);
+        }, SERVER_TICK_RATE);
+
+        this.gameLoops.set(game.gameId, gameInterval);
+      }
+    } catch (error) {
+      this.logger.error(`Error in reconnection: ${error}`);
+    }
   }
 
   private handleRemoteMultiplayer(
@@ -212,10 +271,57 @@ export class GameGateway implements OnGatewayDisconnect {
     if (!game.winner) return;
 
     const winnerIdx = game.clients.findIndex((p) => p.id === game.winner);
+    let reason = 'win';
+
+    if (game.isPaused) {
+      reason = 'timeout';
+    } else if (!game.isFinished) {
+      reason = 'disconnection';
+    }
+
+    this.logger.log(`Game over: winner=${game.winner}, reason=${reason}`);
     this.server.to(gameId).emit('gameOver', {
       winner: (winnerIdx + 1).toString(),
-      reason: game.isFinished ? 'win' : 'disconnection',
+      reason: reason,
     });
+
+    this.logger.log(`Emitted gameOver event to room ${gameId}`);
+  }
+
+  @SubscribeMessage('joinMatchmaking')
+  handleJoinMatchmaking(client: Socket) {
+    try {
+      this.matchmakingQueue.push(client);
+      if (this.matchmakingQueue.length >= 2) {
+        const player1 = this.matchmakingQueue.shift();
+        const player2 = this.matchmakingQueue.shift();
+        this.handleRemoteMultiplayer(player1, player2, 'remote-mp');
+
+        this.updateMatchmakingQueue();
+      }
+    } catch (error) {
+      this.logger.error(`Error with matchmaking: ${error}`);
+      client.emit('matchmakingError', {
+        message: 'Failed to join matchmaking',
+      });
+    }
+  }
+
+  private updateMatchmakingQueue() {
+    this.matchmakingQueue.forEach((client, idx) => {
+      client.emit('matchmakingUpdate', {
+        position: idx + 1,
+        length: this.matchmakingQueue.length,
+        status: 'waiting',
+      });
+    });
+  }
+
+  @SubscribeMessage('leaveMatchmaking')
+  handleLeaveMatchmaking(client: Socket) {
+    this.removeFromQueue(client);
+    client.emit('matchmakingStatus', { status: 'left' });
+    this.updateMatchmakingQueue();
   }
 
   private removeFromQueue(client: Socket) {

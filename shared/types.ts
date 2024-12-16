@@ -35,6 +35,7 @@ export interface GameRoom {
   gameState: GameState;
   gameConstants: GameConstants;
   winner?: string;
+  isPaused?: boolean;
 }
 
 export interface Client {
