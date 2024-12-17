@@ -22,6 +22,13 @@ const Pong = (props: gameProps) => {
   const [previousGameState, setPreviousGameState] = useState<GameRoom | null>(
     null
   );
+  const [finalScore, setFinalScore] = useState<{
+    player1: number;
+    player2: number;
+  }>({
+    player1: 0,
+    player2: 0,
+  });
   const [queuePosition, setQueuePosition] = useState(0);
   const [isMatchmaking, setIsMatchmaking] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
@@ -163,24 +170,35 @@ const Pong = (props: gameProps) => {
       lastUpdateTime.current = performance.now();
     });
 
-    socket.on("gameOver", (data: { winner: string; reason: string }) => {
-      console.log("Game over message received: ", data);
-      setGameStarted(false);
-      setGameOver(true);
-      setWinner(data.winner);
-      setIsPaused(false);
-      localStorage.removeItem("gameId");
-      localStorage.removeItem("disconnectedGameId");
-      setReconnectAvailable(false);
+    socket.on(
+      "gameOver",
+      (data: { winner: string; reason: string; score: number }) => {
+        console.log("Game over message received: ", data);
+        setGameStarted(false);
+        setGameOver(true);
+        setWinner(data.winner);
+        setIsPaused(false);
 
-      let message = `Player ${data.winner} wins!`;
-      if (data.reason === "timeout") {
-        message = `Opponent failed to reconnect. Player ${data.winner} wins!`;
-      } else if (data.reason === "disconnection") {
-        message = `Opponent disconnected. Player ${data.winner} wins!`;
+        if (currentGameState) {
+          setFinalScore({
+            player1: currentGameState.gameState.players[0].score,
+            player2: currentGameState.gameState.players[1].score,
+          });
+        }
+
+        localStorage.removeItem("gameId");
+        localStorage.removeItem("disconnectedGameId");
+        setReconnectAvailable(false);
+
+        let message = `Player ${data.winner} wins! (${finalScore.player1} - ${finalScore.player2})`;
+        if (data.reason === "timeout") {
+          message = `Opponent failed to reconnect. Player ${data.winner} wins!`;
+        } else if (data.reason === "disconnection") {
+          message = `Opponent disconnected. Player ${data.winner} wins!`;
+        }
+        setDisconnectMessage(message);
       }
-      setDisconnectMessage(message);
-    });
+    );
 
     return () => {
       socket?.off("matchmakingStatus");
@@ -331,7 +349,6 @@ const Pong = (props: gameProps) => {
 
     const { PADDLE_HEIGHT, CANVAS_HEIGHT } = currentGameState.gameConstants;
 
-    // Player 1 (W/S keys) in local multiplayer mode
     if (props.mode === "local-mp") {
       if (
         keyRef.current["w"] &&
@@ -348,7 +365,6 @@ const Pong = (props: gameProps) => {
       }
     }
 
-    // Player movement for all modes (Arrow keys)
     if (
       keyRef.current["ArrowUp"] &&
       currentGameState.gameState.players[props.mode === "local-mp" ? 1 : 0]
@@ -458,8 +474,8 @@ const Pong = (props: gameProps) => {
       )}
       {gameOver && (
         <div className="text-center mt-4">
-          <div class="text-xl font-bold">
-            {disconnectMessage || `Player: ${winner}, wins!`}
+          <div className="text-xl font-bold">
+            {disconnectMessage || `Player: ${winner}, wins! (${finalScore.player1} - ${finalScore.player2})`}
           </div>
           <button
             onClick={handleRematch}

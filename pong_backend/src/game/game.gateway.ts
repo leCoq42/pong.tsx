@@ -27,7 +27,11 @@ export class GameGateway implements OnGatewayDisconnect {
   constructor(
     private gameService: GameService,
     private roomService: RoomService,
-  ) {}
+  ) {
+    this.gameService.onGameEnd((data) => {
+      this.handleGameEnd(data);
+    });
+  }
 
   afterInit() {
     this.logger.log('Game Gateway Initialized');
@@ -270,6 +274,19 @@ export class GameGateway implements OnGatewayDisconnect {
     }
   }
 
+  private handleGameEnd(data: {
+    gameId: string;
+    winner: string;
+    reason: string;
+    score: number;
+  }) {
+    this.server.to(data.gameId).emit('gameOver', {
+      winner: data.winner,
+      reason: data.reason,
+      score: data.score,
+    });
+  }
+
   private handleGameOver(gameId: string, game: GameRoom) {
     if (!game.winner) return;
 
@@ -282,10 +299,13 @@ export class GameGateway implements OnGatewayDisconnect {
       reason = 'disconnection';
     }
 
-    this.logger.log(`Game over: winner=${game.winner}, reason=${reason}`);
     this.server.to(gameId).emit('gameOver', {
       winner: (winnerIdx + 1).toString(),
       reason: reason,
+      score: {
+        player1: game.gameState.players[0].score,
+        player2: game.gameState.players[1].score,
+      },
     });
 
     this.logger.log(`Emitted gameOver event to room ${gameId}`);

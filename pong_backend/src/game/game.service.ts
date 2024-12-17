@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { GameRoom, GameState, Ball } from '../../../shared/types';
 import { Logger } from '@nestjs/common';
 import { RoomService } from './room.service';
@@ -19,10 +20,18 @@ export class GameService {
     PADDLE_SPEED: 5,
     CANVAS_WIDTH: 800,
     CANVAS_HEIGHT: 600,
-    WIN_SCORE: 2,
+    WIN_SCORE: 1,
   };
 
-  constructor(private readonly roomService: RoomService) {}
+  
+
+  constructor(private readonly roomService: RoomService,
+    private gameEndEmitter: EventEmitter2
+  ) {}
+
+  onGameEnd(callback: (data: any) => void) {
+    this.gameEndEmitter.on('gameEnd', callback);
+  }
 
   createGame(
     playerIds: string[],
@@ -45,7 +54,7 @@ export class GameService {
         this.DEFAULT_GAME_CONSTANTS.CANVAS_WIDTH / 2 -
         this.DEFAULT_GAME_CONSTANTS.BALL_SIZE / 2,
       y:
-        this.DEFAULT_GAME_CONSTANTS.CANVAS_HEIGHT / 2 -
+        this.DEFAULT_GAME_CONSTANTS.CANVAS_HEIGHT / 2 +
         this.DEFAULT_GAME_CONSTANTS.BALL_SIZE / 2,
       dirX: Math.random() > 0.5 ? 1 : -1,
       dirY: Math.random() > 0.5 ? 1 : -1,
@@ -87,7 +96,6 @@ export class GameService {
 
       this.handleCollisions(game);
       this.checkScore(game);
-      this.checkWinCondition(game);
     } catch (error) {
       this.logger.error(`Error updating game state: ${error}`);
     }
@@ -134,9 +142,11 @@ export class GameService {
     if (ball.x >= CANVAS_WIDTH - BALL_SIZE) {
       game.gameState.players[0].score++;
       this.resetBall(game);
+      this.checkWinCondition(game);
     } else if (ball.x <= 0) {
       game.gameState.players[1].score++;
       this.resetBall(game);
+      this.checkWinCondition(game);
     }
   }
 
@@ -146,20 +156,29 @@ export class GameService {
     const winnerIdx = game.gameState.players.findIndex(
       (player) => player.score >= WIN_SCORE,
     );
-    if (winnerIdx != -1) {
+
+    if (winnerIdx !== -1) {
       game.isActive = false;
       game.isFinished = true;
       game.winner = game.clients[winnerIdx].id;
+
+      this.gameEndEmitter.emit('gameEnd', {
+        gameId: game.gameId,
+        winner: game.winner,
+        reason: 'score',
+        score: game.gameState.players[winnerIdx].score,
+      });
       this.roomService.setRoom(game.gameId, game);
     }
   }
 
   private resetBall(game: GameRoom): void {
-    const { CANVAS_WIDTH, CANVAS_HEIGHT, BALL_SPEED } = game.gameConstants;
+    const { CANVAS_WIDTH, CANVAS_HEIGHT, BALL_SPEED, BALL_SIZE } =
+      game.gameConstants;
 
     game.gameState.ball = {
-      x: CANVAS_WIDTH / 2,
-      y: CANVAS_HEIGHT / 2,
+      x: CANVAS_WIDTH / 2 - BALL_SIZE / 2,
+      y: CANVAS_HEIGHT / 2 - BALL_SIZE / 2,
       dirX: Math.random() > 0.5 ? 1 : -1,
       dirY: Math.random() > 0.5 ? 1 : -1,
       speed: BALL_SPEED,
