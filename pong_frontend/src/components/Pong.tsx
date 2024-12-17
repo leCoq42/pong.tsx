@@ -32,6 +32,8 @@ const Pong = (props: gameProps) => {
   const lastUpdateTime = useRef<number>(0);
   const animationFrameRef = useRef<number>();
 
+  const keyRef = useRef<{ [key: string]: boolean }>({});
+
   const handleStart = useCallback(() => {
     setGameStarted(true);
     setGameOver(false);
@@ -310,39 +312,92 @@ const Pong = (props: gameProps) => {
     };
   }, [currentGameState, previousGameState, gameStarted, updateCanvas]);
 
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (!gameStarted) return;
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (["ArrowUp", "ArrowDown", "w", "s"].includes(e.key)) {
+      e.preventDefault();
+    }
+    keyRef.current[e.key] = true;
+  }, []);
 
-      if (props.mode === "local-mp") {
-        if (e.key.toLowerCase() === "w") {
-          socketRef.current?.emit("updatePosition", { dir: -1, player: 1 });
-        } else if (e.key.toLowerCase() === "s") {
-          socketRef.current?.emit("updatePosition", { dir: 1, player: 1 });
-        }
+  const handleKeyUp = useCallback((e: KeyboardEvent) => {
+    keyRef.current[e.key] = false;
+  }, []);
 
-        if (e.key === "ArrowUp") {
-          socketRef.current?.emit("updatePosition", { dir: -1, player: 2 });
-        } else if (e.key === "ArrowDown") {
-          socketRef.current?.emit("updatePosition", { dir: 1, player: 2 });
-        }
-      } else {
-        if (e.key === "ArrowUp") {
-          socketRef.current?.emit("updatePosition", { dir: -1 });
-        } else if (e.key === "ArrowDown") {
-          socketRef.current?.emit("updatePosition", { dir: 1 });
-        }
+  const updatePaddles = useCallback(() => {
+    if (!currentGameState) return;
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const { PADDLE_HEIGHT, CANVAS_HEIGHT } = currentGameState.gameConstants;
+
+    // Player 1 (W/S keys) in local multiplayer mode
+    if (props.mode === "local-mp") {
+      if (
+        keyRef.current["w"] &&
+        currentGameState.gameState.players[0].position > 0
+      ) {
+        socketRef.current?.emit("updatePosition", { dir: -1, player: 1 });
       }
-    },
-    [gameStarted, props.mode]
-  );
+      if (
+        keyRef.current["s"] &&
+        currentGameState.gameState.players[0].position <
+          CANVAS_HEIGHT - PADDLE_HEIGHT
+      ) {
+        socketRef.current?.emit("updatePosition", { dir: 1, player: 1 });
+      }
+    }
+
+    // Player movement for all modes (Arrow keys)
+    if (
+      keyRef.current["ArrowUp"] &&
+      currentGameState.gameState.players[props.mode === "local-mp" ? 1 : 0]
+        .position > 0
+    ) {
+      socketRef.current?.emit("updatePosition", {
+        dir: -1,
+        player: props.mode === "local-mp" ? 2 : 1,
+      });
+    }
+    if (
+      keyRef.current["ArrowDown"] &&
+      currentGameState.gameState.players[props.mode === "local-mp" ? 1 : 0]
+        .position <
+        CANVAS_HEIGHT - PADDLE_HEIGHT
+    ) {
+      socketRef.current?.emit("updatePosition", {
+        dir: 1,
+        player: props.mode === "local-mp" ? 2 : 1,
+      });
+    }
+  }, [currentGameState, props.mode]);
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [handleKeyDown]);
+  }, [handleKeyDown, handleKeyUp]);
+
+  useEffect(() => {
+    if (!gameStarted) return;
+
+    let animationFrameId: number;
+    const updateLoop = () => {
+      updatePaddles();
+      animationFrameId = requestAnimationFrame(updateLoop);
+    };
+
+    animationFrameId = requestAnimationFrame(updateLoop);
+
+    return () => {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+      }
+    };
+  }, [gameStarted, updatePaddles]);
 
   if (connectionError) {
     return <div className="text-red-500">{connectionError}</div>;
@@ -403,7 +458,7 @@ const Pong = (props: gameProps) => {
       )}
       {gameOver && (
         <div className="text-center mt-4">
-          <div className="text-xl font-bold">
+          <div class="text-xl font-bold">
             {disconnectMessage || `Player: ${winner}, wins!`}
           </div>
           <button

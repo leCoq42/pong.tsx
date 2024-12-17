@@ -1,86 +1,40 @@
 import { Injectable } from '@nestjs/common';
-import { v4 as uuid } from 'uuid';
-import {
-  GameRoom,
-  GameState,
-  Client,
-  Player,
-  Ball,
-} from '../../../shared/types';
+import { GameRoom, GameState, Ball } from '../../../shared/types';
 import { Logger } from '@nestjs/common';
+import { RoomService } from './room.service';
 
 const SERVER_TICK_RATE = 1000 / 120;
 
 @Injectable()
 export class GameService {
-  private rooms: Map<string, GameRoom> = new Map();
-  private playerGameMap: Map<string, string> = new Map();
   private gameLoops: Map<string, NodeJS.Timeout> = new Map();
   private readonly logger = new Logger(GameService.name);
-  readonly RECONNECT_TIMEOUT = 5000; // Make this public
-  private disconnectedPlayers: Map<
-    string,
-    { gameId: string; timestamp: number }
-  > = new Map();
 
   private readonly DEFAULT_GAME_CONSTANTS = {
     PADDLE_HEIGHT: 100,
     PADDLE_WIDTH: 10,
     BALL_SIZE: 20,
-    BALL_SPEED: 1,
+    BALL_SPEED: 2,
     BALL_ACCELERATION: 1.1,
-    PADDLE_SPEED: 10,
+    PADDLE_SPEED: 5,
     CANVAS_WIDTH: 800,
     CANVAS_HEIGHT: 600,
-    WIN_SCORE: 3,
+    WIN_SCORE: 2,
   };
+
+  constructor(private readonly roomService: RoomService) {}
 
   createGame(
     playerIds: string[],
     mode: 'singleplayer' | 'local-mp' | 'remote-mp',
   ): string {
-    const gameId = uuid();
     const initialGameState = this.createInitialGameState();
-
-    const clients: Client[] = [];
-    if (mode === 'singleplayer') {
-      clients.push({ id: playerIds[0] }, { id: 'bot' });
-    } else if (mode === 'local-mp') {
-      clients.push({ id: playerIds[0] }, { id: 'player2' });
-    } else {
-      clients.push({ id: playerIds[0] }, { id: playerIds[1] });
-    }
-
-    const players: Player[] = [
-      {
-        score: 0,
-        position:
-          this.DEFAULT_GAME_CONSTANTS.CANVAS_HEIGHT / 2 -
-          this.DEFAULT_GAME_CONSTANTS.PADDLE_HEIGHT / 2,
-      },
-      {
-        score: 0,
-        position:
-          this.DEFAULT_GAME_CONSTANTS.CANVAS_HEIGHT / 2 -
-          this.DEFAULT_GAME_CONSTANTS.PADDLE_HEIGHT / 2,
-      },
-    ];
-
-    const gameRoom: GameRoom = {
-      gameId,
-      clients,
-      mode: mode,
-      isActive: true,
-      isFinished: false,
-      gameState: { ball: initialGameState.ball, players },
-      gameConstants: { ...this.DEFAULT_GAME_CONSTANTS },
-    };
-
-    this.rooms.set(gameId, gameRoom);
-    playerIds.forEach((playerId) => {
-      this.playerGameMap.set(playerId, gameId);
-    });
-
+    const gameId = this.roomService.initializeRoom(
+      playerIds,
+      mode,
+      initialGameState,
+      this.DEFAULT_GAME_CONSTANTS,
+    );
     this.startGameLoop(gameId);
     return gameId;
   }
@@ -100,13 +54,26 @@ export class GameService {
 
     return {
       ball,
-      players: [],
+      players: [
+        {
+          score: 0,
+          position:
+            this.DEFAULT_GAME_CONSTANTS.CANVAS_HEIGHT / 2 -
+            this.DEFAULT_GAME_CONSTANTS.PADDLE_HEIGHT / 2,
+        },
+        {
+          score: 0,
+          position:
+            this.DEFAULT_GAME_CONSTANTS.CANVAS_HEIGHT / 2 -
+            this.DEFAULT_GAME_CONSTANTS.PADDLE_HEIGHT / 2,
+        },
+      ],
     };
   }
 
   updateGameState(gameId: string): void {
     try {
-      const game = this.rooms.get(gameId);
+      const game = this.roomService.getRoom(gameId);
       if (!game || !game.isActive) return;
 
       game.gameState.ball.x +=
@@ -183,7 +150,7 @@ export class GameService {
       game.isActive = false;
       game.isFinished = true;
       game.winner = game.clients[winnerIdx].id;
-      this.rooms.set(game.gameId, game);
+      this.roomService.setRoom(game.gameId, game);
     }
   }
 
@@ -197,24 +164,6 @@ export class GameService {
       dirY: Math.random() > 0.5 ? 1 : -1,
       speed: BALL_SPEED,
     };
-  }
-
-  updatePlayerPosition(
-    gameId: string,
-    playerIdx: number,
-    newPosition: number,
-  ): void {
-    const game = this.rooms.get(gameId);
-    if (!game) return;
-
-    if (playerIdx >= 0 && playerIdx < game.gameState.players.length) {
-      const maxPosition =
-        game.gameConstants.CANVAS_HEIGHT - game.gameConstants.PADDLE_HEIGHT;
-      game.gameState.players[playerIdx].position = Math.max(
-        0,
-        Math.min(newPosition, maxPosition),
-      );
-    }
   }
 
   private updateAIPosition(game: GameRoom): void {
@@ -243,59 +192,14 @@ export class GameService {
     }
   }
 
-  getGameRoom(gameId: string): GameRoom | undefined {
-    return this.rooms.get(gameId);
-  }
-
-  getGameIdByPlayerId(playerId: string): string | undefined {
-    return this.playerGameMap.get(playerId);
-  }
-
-  getGameByPlayerId(playerId: string): string | undefined {
-    return this.playerGameMap.get(playerId);
-  }
-
-  isPlayerInGame(playerId: string): boolean {
-    return this.playerGameMap.has(playerId);
-  }
-
-  getOpponent(gameId: string, playerId: string): Player | undefined {
-    const game = this.rooms.get(gameId);
-    if (!game) return undefined;
-
-    return game.gameState.players.find(
-      (_, index) => game.clients[index].id !== playerId,
-    );
-  }
-
-  removeGame(playerId: string) {
-    const gameId = this.playerGameMap.get(playerId);
-    if (gameId) {
-      this.cleanUpGame(gameId);
-      this.playerGameMap.delete(playerId);
-    }
-  }
-
   private cleanUpGame(gameId: string): void {
     this.stopGameLoop(gameId);
-    const game = this.rooms.get(gameId);
-    if (game) {
-      game.clients.forEach((player) => {
-        this.playerGameMap.delete(player.id);
-      });
-      this.rooms.delete(gameId);
-
-      const gameLoop = this.gameLoops.get(gameId);
-      if (gameLoop) {
-        clearInterval(gameLoop);
-        this.gameLoops.delete(gameId);
-      }
-    }
+    this.roomService.removeRoom(gameId);
   }
 
   private startGameLoop(gameId: string) {
     const interval = setInterval(() => {
-      const gameState = this.rooms.get(gameId);
+      const gameState = this.roomService.getRoom(gameId);
       if (!gameState || !gameState.isActive) {
         this.stopGameLoop(gameId);
         return;
@@ -313,104 +217,11 @@ export class GameService {
     }
   }
 
-  handlePlayerDisconnect(
-    gameId: string,
-    playerId: string,
-  ): GameRoom | undefined {
-    const game = this.rooms.get(gameId);
-    if (!game) return undefined;
-
-    const playerIdx = game.clients.findIndex((c) => c.id === playerId);
-    const opponentIdx = game.clients.findIndex((c) => c.id !== playerId);
-
-    if (playerIdx === -1 || opponentIdx === -1) return undefined;
-
-    if (game.mode === 'local-mp' || game.mode === 'remote-mp') {
-      if (!game.isFinished) {
-        // Store disconnected player info with timestamp
-        this.disconnectedPlayers.set(playerId, {
-          gameId,
-          timestamp: Date.now(),
-        });
-
-        // Set game to paused instead of finished
-        game.isActive = false;
-        game.isPaused = true;
-        this.rooms.set(gameId, game);
-
-        // Schedule cleanup if player doesn't reconnect
-        setTimeout(() => {
-          this.handleReconnectTimeout(gameId, playerId);
-        }, this.RECONNECT_TIMEOUT);
-
-        return game;
-      } else {
-        // Normal cleanup for finished games
-        this.cleanUpGame(gameId);
-      }
-    } else if (game.mode === 'singleplayer') {
-      this.cleanUpGame(gameId);
-    }
-    return undefined;
-  }
-
-  handleReconnectTimeout(gameId: string, playerId: string) {
-    const disconnectedInfo = this.disconnectedPlayers.get(playerId);
-    if (!disconnectedInfo || disconnectedInfo.gameId !== gameId) return;
-
-    const game = this.rooms.get(gameId);
-    if (!game) return;
-
-    // Set the remaining player as winner
-    this.disconnectedPlayers.delete(playerId);
-    game.isActive = false;
-    game.isFinished = true;
-    game.isPaused = false;
-    game.winner = game.clients.find((c) => c.id !== playerId)?.id;
-    
-    this.rooms.set(gameId, game);
-    
-    return game;
-  }
-
-  handleReconnect(playerId: string): GameRoom | undefined {
-    const disconnectedInfo = this.disconnectedPlayers.get(playerId);
-    if (!disconnectedInfo) return undefined;
-
-    const game = this.rooms.get(disconnectedInfo.gameId);
-    if (!game || game.isFinished) return undefined;
-
-    // Remove from disconnected players list
-    this.disconnectedPlayers.delete(playerId);
-
-    // Resume the game
-    game.isActive = true;
-    game.isPaused = false;
-    this.rooms.set(disconnectedInfo.gameId, game);
-
-    return game;
-  }
-
-  getDisconnectedPlayerInfo(playerId: string) {
-    const info = this.disconnectedPlayers.get(playerId);
-    if (!info) return null;
-    
-    // Verify the game still exists and is in a reconnectable state
-    const game = this.rooms.get(info.gameId);
-    if (!game || game.isFinished) {
-      this.disconnectedPlayers.delete(playerId);
-      return null;
-    }
-    
-    return info;
-  }
-
   onModuleDestroy() {
-    for (const [gameId] of this.rooms) {
+    for (const [gameId] of this.roomService.getAllRooms()) {
       this.cleanUpGame(gameId);
     }
-    this.rooms.clear();
-    this.playerGameMap.clear();
+    this.roomService.clearAllRooms();
     this.gameLoops.clear();
   }
 }

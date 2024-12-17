@@ -6,6 +6,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { GameService } from './game.service';
+import { RoomService } from './room.service';
 import { GameRoom } from '../../../shared/types';
 import { Logger } from '@nestjs/common';
 
@@ -23,7 +24,10 @@ export class GameGateway implements OnGatewayDisconnect {
   private matchmakingQueue: Socket[] = [];
   private gameLoops: Map<string, NodeJS.Timeout> = new Map();
 
-  constructor(private gameService: GameService) {}
+  constructor(
+    private gameService: GameService,
+    private roomService: RoomService,
+  ) {}
 
   afterInit() {
     this.logger.log('Game Gateway Initialized');
@@ -31,7 +35,7 @@ export class GameGateway implements OnGatewayDisconnect {
 
   handleConnection(client: Socket) {
     this.logger.log('Client connected: ' + client.id);
-    const disconnectedInfo = this.gameService.getDisconnectedPlayerInfo(
+    const disconnectedInfo = this.roomService.getDisconnectedPlayerInfo(
       client.id,
     );
     if (disconnectedInfo) {
@@ -43,9 +47,9 @@ export class GameGateway implements OnGatewayDisconnect {
     try {
       this.logger.log(`Opponent disconnected: ${client.id}`);
       this.removeFromQueue(client);
-      const gameId = this.gameService.getGameIdByPlayerId(client.id);
+      const gameId = this.roomService.getRoomByPlayerId(client.id);
       if (gameId) {
-        const updatedGame = this.gameService.handlePlayerDisconnect(
+        const updatedGame = this.roomService.handlePlayerDisconnect(
           gameId,
           client.id,
         );
@@ -62,16 +66,16 @@ export class GameGateway implements OnGatewayDisconnect {
           }
 
           const timeoutId = setTimeout(() => {
-            const timeoutGame = this.gameService.handleReconnectTimeout(
+            const timeoutGame = this.roomService.handleReconnectTimeout(
               gameId,
               client.id,
             );
             if (timeoutGame) {
               this.handleGameOver(gameId, timeoutGame);
               this.gameLoops.delete(gameId);
-              this.gameService.removeGame(client.id);
+              this.roomService.removeRoom(gameId);
             }
-          }, this.gameService.RECONNECT_TIMEOUT);
+          }, this.roomService.RECONNECT_TIMEOUT);
           this.gameLoops.set(gameId, timeoutId);
         }
       }
@@ -119,10 +123,10 @@ export class GameGateway implements OnGatewayDisconnect {
     payload: { dir: number; player?: number },
   ) {
     try {
-      const gameId = this.gameService.getGameIdByPlayerId(client.id);
+      const gameId = this.roomService.getRoomByPlayerId(client.id);
       if (!gameId) return;
 
-      const game = this.gameService.getGameRoom(gameId);
+      const game = this.roomService.getRoom(gameId);
       if (!game) return;
 
       let playerIdx: number;
@@ -142,7 +146,8 @@ export class GameGateway implements OnGatewayDisconnect {
         game.gameConstants.CANVAS_HEIGHT - game.gameConstants.PADDLE_HEIGHT;
       const finalPosition = Math.max(0, Math.min(newPosition, maxPosition));
 
-      this.gameService.updatePlayerPosition(gameId, playerIdx, finalPosition);
+      game.gameState.players[playerIdx].position = finalPosition;
+      this.roomService.setRoom(gameId, game);
     } catch (error) {
       this.logger.error(`Error updating position: ${error}`);
     }
@@ -151,9 +156,8 @@ export class GameGateway implements OnGatewayDisconnect {
   @SubscribeMessage('reconnectToGame')
   handleReconnect(client: Socket) {
     try {
-      const game = this.gameService.handleReconnect(client.id);
+      const game = this.roomService.handleReconnect(client.id);
       if (game) {
-        // Clear any existing timeout
         if (this.gameLoops.has(game.gameId)) {
           clearTimeout(this.gameLoops.get(game.gameId));
           this.gameLoops.delete(game.gameId);
@@ -165,9 +169,8 @@ export class GameGateway implements OnGatewayDisconnect {
           gameState: game,
         });
 
-        // Restart game interval
         const gameInterval = setInterval(() => {
-          const currentGame = this.gameService.getGameRoom(game.gameId);
+          const currentGame = this.roomService.getRoom(game.gameId);
           if (!currentGame || !currentGame.isActive) {
             clearInterval(gameInterval);
             return;
@@ -193,13 +196,13 @@ export class GameGateway implements OnGatewayDisconnect {
     player1.join(gameId);
     player2.join(gameId);
 
-    const game = this.gameService.getGameRoom(gameId);
+    const game = this.roomService.getRoom(gameId);
 
     player1.emit('gameStarted', { gameId, game });
     player2.emit('gameStarted', { gameId, game });
 
     const gameInterval = setInterval(() => {
-      const currentGame = this.gameService.getGameRoom(gameId);
+      const currentGame = this.roomService.getRoom(gameId);
       if (!currentGame) {
         clearInterval(gameInterval);
         return;
@@ -225,12 +228,12 @@ export class GameGateway implements OnGatewayDisconnect {
       );
 
       client.join(gameId);
-      const game = this.gameService.getGameRoom(gameId);
+      const game = this.roomService.getRoom(gameId);
 
       client.emit('gameStarted', { gameId, game });
 
       const gameInterval = setInterval(() => {
-        const currentGame = this.gameService.getGameRoom(gameId);
+        const currentGame = this.roomService.getRoom(gameId);
         if (!currentGame || !currentGame.isActive) {
           clearInterval(gameInterval);
           return;
@@ -249,11 +252,11 @@ export class GameGateway implements OnGatewayDisconnect {
       const gameId = this.gameService.createGame([client.id], 'singleplayer');
       client.join(gameId);
 
-      const game = this.gameService.getGameRoom(gameId);
+      const game = this.roomService.getRoom(gameId);
       client.emit('gameStarted', { gameId, game });
 
       const gameInterval = setInterval(() => {
-        const currentGame = this.gameService.getGameRoom(gameId);
+        const currentGame = this.roomService.getRoom(gameId);
         if (!currentGame || !currentGame.isActive) {
           clearInterval(gameInterval);
           return;
