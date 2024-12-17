@@ -26,7 +26,7 @@ export class GameService {
   private readonly DEFAULT_GAME_CONSTANTS = {
     PADDLE_HEIGHT: 100,
     PADDLE_WIDTH: 10,
-    BALL_SIZE: 10,
+    BALL_SIZE: 20,
     BALL_SPEED: 1,
     BALL_ACCELERATION: 1.1,
     PADDLE_SPEED: 10,
@@ -146,13 +146,12 @@ export class GameService {
     }
 
     game.gameState.players.forEach((player, index) => {
-      const paddleX =
-        index === 0 ? PADDLE_WIDTH : CANVAS_WIDTH - PADDLE_WIDTH - BALL_SIZE;
+      const paddleX = index === 0 ? 0 : CANVAS_WIDTH - PADDLE_WIDTH;
       const paddleY = player.position;
 
       if (
+        ball.x + BALL_SIZE >= paddleX &&
         ball.x <= paddleX + PADDLE_WIDTH &&
-        ball.x >= paddleX - BALL_SIZE &&
         ball.y + BALL_SIZE >= paddleY &&
         ball.y <= paddleY + PADDLE_HEIGHT
       ) {
