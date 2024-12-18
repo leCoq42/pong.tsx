@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useOutletContext } from "react-router-dom";
 import { io, Socket } from "socket.io-client";
 import { gameProps } from "../types";
 import { GameRoom } from "../../../shared/types";
+
+const FRAME_RATE = 1000 / 60;
 
 const lerp = (start: number, end: number, t: number) => {
   t = Math.max(0, Math.min(1, t));
@@ -38,7 +41,9 @@ const Pong = (props: gameProps) => {
   const [reconnectAvailable, setReconnectAvailable] = useState(false);
   const lastUpdateTime = useRef<number>(0);
   const animationFrameRef = useRef<number>();
-
+  const { setGameActive } = useOutletContext<{
+    setGameActive: (active: boolean) => void;
+  }>();
   const keyRef = useRef<{ [key: string]: boolean }>({});
 
   const handleStart = useCallback(() => {
@@ -60,11 +65,13 @@ const Pong = (props: gameProps) => {
   }, []);
 
   const handleRematch = useCallback(() => {
+    console.log("Rematch requested for mode: ", props.mode);
     setGameStarted(true);
     setGameOver(false);
     setWinner(null);
     setDisconnectMessage("");
-    socketRef.current?.emit("rematch", { mode: props.mode });
+    setGameActive(true);
+    socketRef.current?.emit("rematch", props.mode );
   }, [props.mode]);
 
   useEffect(() => {
@@ -178,6 +185,7 @@ const Pong = (props: gameProps) => {
         setGameOver(true);
         setWinner(data.winner);
         setIsPaused(false);
+        setGameActive(false);
 
         if (currentGameState) {
           setFinalScore({
@@ -226,7 +234,7 @@ const Pong = (props: gameProps) => {
 
     const context = canvas.getContext("2d", { alpha: false });
     if (!context) {
-      console.log("No canvas contxt");
+      console.log("No canvas context");
       return;
     }
 
@@ -236,87 +244,103 @@ const Pong = (props: gameProps) => {
     context.strokeStyle = "white";
     context.setLineDash([5, 15]);
     context.beginPath();
-    context.moveTo(canvas.width / 2, 0);
-    context.lineTo(canvas.width / 2, canvas.height);
+    context.moveTo(context.canvas.width / 2, 0);
+    context.lineTo(context.canvas.width / 2, context.canvas.height);
     context.stroke();
     context.setLineDash([]);
 
     context.fillStyle = "white";
+    drawGameElements(context, game);
+  }, []);
+
+  const drawGameElements = (
+    context: CanvasRenderingContext2D,
+    game: GameRoom
+  ) => {
     game.gameState.players.forEach((player, idx) => {
       const paddleX =
-        idx === 0 ? 0 : canvas.width - game.gameConstants.PADDLE_WIDTH;
+        idx === 0 ? 0 : context.canvas.width - game.gameConstants.PADDLE_WIDTH;
       context.fillRect(
         paddleX,
         player.position,
         game.gameConstants.PADDLE_WIDTH,
         game.gameConstants.PADDLE_HEIGHT
       );
-    });
 
-    context.fillRect(
-      game.gameState.ball.x,
-      game.gameState.ball.y,
-      game.gameConstants.BALL_SIZE,
-      game.gameConstants.BALL_SIZE
-    );
+      context.fillRect(
+        Math.round(game.gameState.ball.x),
+        Math.round(game.gameState.ball.y),
+        game.gameConstants.BALL_SIZE,
+        game.gameConstants.BALL_SIZE
+      );
 
-    context.font = "30px Arial";
-    context.textBaseline = "top";
-    context.textAlign = "center";
-    game.gameState.players.forEach((player, idx) => {
-      const scoreX = idx === 0 ? canvas.width / 4 : (canvas.width * 3) / 4;
-      context.fillText(player.score.toString(), scoreX, 30);
-    });
-
-    if (game.isPaused) {
       context.font = "30px Arial";
-      context.fillStyle = "white";
+      context.textBaseline = "top";
       context.textAlign = "center";
-      context.fillText("Game Paused", canvas.width / 2, canvas.height / 2);
-    }
-  }, []);
+      game.gameState.players.forEach((player, idx) => {
+        const scoreX =
+          idx === 0 ? context.canvas.width / 4 : (context.canvas.width * 3) / 4;
+        context.fillText(player.score.toString(), scoreX, 30);
+      });
+
+      if (game.isPaused) {
+        context.font = "30px Arial";
+        context.fillStyle = "white";
+        context.textAlign = "center";
+        context.fillText(
+          "Game Paused",
+          context.canvas.width / 2,
+          context.canvas.height / 2
+        );
+      }
+    });
+  };
 
   useEffect(() => {
+    let lastRenderTime = 0;
     const render = (timestamp: number) => {
-      if (currentGameState) {
-        if (previousGameState) {
-          const timeSinceUpdate = timestamp - lastUpdateTime.current;
-          const interpolationFactor = Math.min(
-            timeSinceUpdate / (1000 / 60),
-            1
-          );
+      if (timestamp - lastRenderTime >= FRAME_RATE) {
+        if (currentGameState) {
+          if (previousGameState) {
+            const timeSinceUpdate = timestamp - lastRenderTime;
+            const interpolationFactor = Math.min(
+              timeSinceUpdate / (1000 / 60),
+              1
+            );
 
-          const interpolatedState = {
-            ...currentGameState,
-            gameState: {
-              ball: {
-                ...currentGameState.gameState.ball,
-                x: lerp(
-                  previousGameState.gameState.ball.x,
-                  currentGameState.gameState.ball.x,
-                  interpolationFactor
-                ),
-                y: lerp(
-                  previousGameState.gameState.ball.y,
-                  currentGameState.gameState.ball.y,
-                  interpolationFactor
-                ),
-              },
-              players: currentGameState.gameState.players.map(
-                (player, idx) => ({
-                  ...player,
-                  position: lerp(
-                    previousGameState.gameState.players[idx].position,
-                    player.position,
+            const interpolatedState = {
+              ...currentGameState,
+              gameState: {
+                ball: {
+                  ...currentGameState.gameState.ball,
+                  x: lerp(
+                    previousGameState.gameState.ball.x,
+                    currentGameState.gameState.ball.x,
                     interpolationFactor
                   ),
-                })
-              ),
-            },
-          };
-          updateCanvas(interpolatedState);
-        } else {
-          updateCanvas(currentGameState);
+                  y: lerp(
+                    previousGameState.gameState.ball.y,
+                    currentGameState.gameState.ball.y,
+                    interpolationFactor
+                  ),
+                },
+                players: currentGameState.gameState.players.map(
+                  (player, idx) => ({
+                    ...player,
+                    position: lerp(
+                      previousGameState.gameState.players[idx].position,
+                      player.position,
+                      interpolationFactor
+                    ),
+                  })
+                ),
+              },
+            };
+            updateCanvas(interpolatedState);
+          } else {
+            updateCanvas(currentGameState);
+          }
+          lastRenderTime = timestamp;
         }
       }
       animationFrameRef.current = requestAnimationFrame(render);
@@ -434,35 +458,39 @@ const Pong = (props: gameProps) => {
         {props.mode === "singleplayer" &&
           "Player 1: Up/Down arrow keys | Player 2: computer"}
       </div>
-      {props.mode != "remote-mp" && !gameStarted && (
-        <button
-          onClick={handleStart}
-          className="px-4 mt-2 py-2 bg-green-500 text-white rounded"
-        >
-          Start Game
-        </button>
-      )}
-      {props.mode === "remote-mp" && !gameStarted && (
-        <div>
-          {!isMatchmaking ? (
+      {!gameStarted && !gameOver && (
+        <>
+          {props.mode != "remote-mp" && (
             <button
-              onClick={handleStartdMatchmaking}
-              className="px-4 py-2 bg-blue-500 text-white rounded"
+              onClick={handleStart}
+              className="px-4 mt-2 py-2 bg-green-500 text-white rounded"
             >
-              Find Match
+              Start Game
             </button>
-          ) : (
-            <div className="text-center">
-              <div>Finding match... Position in queue: {queuePosition}</div>
-              <button
-                onClick={handleCancelMatchmaking}
-                className="px-4 py-2 mt-2 bg-red-500 text-white rounded"
-              >
-                Cancel
-              </button>
+          )}
+          {props.mode === "remote-mp" && (
+            <div>
+              {!isMatchmaking ? (
+                <button
+                  onClick={handleStartdMatchmaking}
+                  className="px-4 py-2 bg-blue-500 text-white rounded"
+                >
+                  Find Match
+                </button>
+              ) : (
+                <div className="text-center">
+                  <div>Finding match... Position in queue: {queuePosition}</div>
+                  <button
+                    onClick={handleCancelMatchmaking}
+                    className="px-4 py-2 mt-2 bg-red-500 text-white rounded"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
             </div>
           )}
-        </div>
+        </>
       )}
       {gameStarted && (
         <canvas
@@ -475,7 +503,10 @@ const Pong = (props: gameProps) => {
       {gameOver && (
         <div className="text-center mt-4">
           <div className="text-xl font-bold">
-            {disconnectMessage || `Player: ${winner}, wins! (${finalScore.player1} - ${finalScore.player2})`}
+            {disconnectMessage || `Game Over! ${winner} wins!`}
+          </div>
+          <div className="mt-2">
+            Final Score: {finalScore.player1} - {finalScore.player2}
           </div>
           <button
             onClick={handleRematch}

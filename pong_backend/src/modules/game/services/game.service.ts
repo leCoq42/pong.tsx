@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { GameRoom, GameState, Ball } from '../../../shared/types';
+import { GameRoom, GameState, Ball } from '../../../../../shared/types';
 import { Logger } from '@nestjs/common';
 import { RoomService } from './room.service';
 
@@ -23,10 +23,9 @@ export class GameService {
     WIN_SCORE: 1,
   };
 
-  
-
-  constructor(private readonly roomService: RoomService,
-    private gameEndEmitter: EventEmitter2
+  constructor(
+    private readonly roomService: RoomService,
+    private gameEndEmitter: EventEmitter2,
   ) {}
 
   onGameEnd(callback: (data: any) => void) {

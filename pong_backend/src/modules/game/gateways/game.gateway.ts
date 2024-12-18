@@ -5,9 +5,9 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { GameService } from './game.service';
-import { RoomService } from './room.service';
-import { GameRoom } from '../../../shared/types';
+import { GameService } from '../services/game.service';
+import { RoomService } from '../services/room.service';
+import { GameRoom } from '../../../../../shared/types';
 import { Logger } from '@nestjs/common';
 
 const SERVER_TICK_RATE = 1000 / 60;
@@ -118,6 +118,7 @@ export class GameGateway implements OnGatewayDisconnect {
     client: Socket,
     mode: 'local-mp' | 'remote-mp' | 'singleplayer',
   ) {
+    this.logger.log(`Player ${client.id} requested rematch for mode: ${mode}`);
     this.handleStartGame(client, mode);
   }
 

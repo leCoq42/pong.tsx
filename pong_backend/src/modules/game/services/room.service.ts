@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { GameRoom, GameState } from '../../../shared/types';
+import { GameRoom, GameState } from '../../../../../shared/types';
 import { Logger } from '@nestjs/common';
 import { v4 as uuid } from 'uuid';
 
