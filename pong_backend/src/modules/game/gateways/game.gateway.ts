@@ -5,7 +5,7 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { GameService } from '../services/game.service';
+import { GameService } from '../services/gameLogic.service';
 import { RoomService } from '../services/room.service';
 import { GameRoom } from '../../../../../shared/types';
 import { Logger } from '@nestjs/common';
@@ -15,6 +15,7 @@ const SERVER_TICK_RATE = 1000 / 60;
 @WebSocketGateway({
   cors: {
     origin: '*',
+    credentials: true,
   },
   namespace: 'game',
 })
@@ -39,12 +40,9 @@ export class GameGateway implements OnGatewayDisconnect {
 
   handleConnection(client: Socket) {
     this.logger.log('Client connected: ' + client.id);
-    const disconnectedInfo = this.roomService.getDisconnectedPlayerInfo(
-      client.id,
-    );
-    if (disconnectedInfo) {
-      client.emit('canReconnect', { gameId: disconnectedInfo.gameId });
-    }
+
+    const rooms = [...client.rooms];
+    this.logger.log(`Client ${client.id} is in rooms:`, rooms);
   }
 
   handleDisconnect(client: Socket) {
@@ -68,24 +66,47 @@ export class GameGateway implements OnGatewayDisconnect {
             clearInterval(this.gameLoops.get(gameId));
             this.gameLoops.delete(gameId);
           }
-
-          const timeoutId = setTimeout(() => {
-            const timeoutGame = this.roomService.handleReconnectTimeout(
-              gameId,
-              client.id,
-            );
-            if (timeoutGame) {
-              this.handleGameOver(gameId, timeoutGame);
-              this.gameLoops.delete(gameId);
-              this.roomService.removeRoom(gameId);
-            }
-          }, this.roomService.RECONNECT_TIMEOUT);
-          this.gameLoops.set(gameId, timeoutId);
         }
       }
     } catch (e) {
       this.logger.error(`Error on disconnect: ${e}`);
     }
+  }
+
+  @SubscribeMessage('joinGame')
+  handleJoinGame(client: Socket, data: { gameId: string }) {
+    try {
+      const game = this.roomService.getRoom(data.gameId);
+      if (!game) {
+        throw new Error('Game not found');
+      }
+
+      client.join(data.gameId);
+
+      if (game.mode === 'singleplayer' || game.mode === 'local-mp') {
+        this.startGameLoop(data.gameId);
+      } else if (game.mode === 'remote-mp') {
+        const room = this.server.sockets.adapter.rooms.get(data.gameId);
+        if (room?.size === 2) {
+          this.startGameLoop(data.gameId);
+        }
+      }
+    } catch (error) {
+      this.logger.error(`Error joining game: ${error}`);
+    }
+  }
+
+  private startGameLoop(gameId: string) {
+    const gameInterval = setInterval(() => {
+      const currentGame = this.roomService.getRoom(gameId);
+      if (!currentGame || !currentGame.isActive) {
+        clearInterval(gameInterval);
+        return;
+      }
+      this.gameService.updateGameState(gameId);
+      this.server.to(gameId).emit('gameState', currentGame);
+    }, SERVER_TICK_RATE);
+    this.gameLoops.set(gameId, gameInterval);
   }
 
   @SubscribeMessage('startGame')
@@ -129,10 +150,16 @@ export class GameGateway implements OnGatewayDisconnect {
   ) {
     try {
       const gameId = this.roomService.getRoomByPlayerId(client.id);
-      if (!gameId) return;
+      if (!gameId) {
+        console.log('No game found for player:', client.id);
+        return;
+      }
 
       const game = this.roomService.getRoom(gameId);
-      if (!game) return;
+      if (!game) {
+        console.log('Game not found:', gameId);
+        return;
+      }
 
       let playerIdx: number;
 
@@ -142,7 +169,10 @@ export class GameGateway implements OnGatewayDisconnect {
         playerIdx = game.clients.findIndex((p) => p.id === client.id);
       }
 
-      if (playerIdx === -1) return;
+      if (playerIdx === -1) {
+        console.log('Player index not found:', client.id);
+        return;
+      }
 
       const currentPosition = game.gameState.players[playerIdx].position;
       const newPosition =
@@ -153,41 +183,13 @@ export class GameGateway implements OnGatewayDisconnect {
 
       game.gameState.players[playerIdx].position = finalPosition;
       this.roomService.setRoom(gameId, game);
+
+      console.log(
+        `Player ${playerIdx} moved from ${currentPosition} to ${finalPosition}`,
+      );
+      this.server.to(gameId).emit('gameState', game);
     } catch (error) {
       this.logger.error(`Error updating position: ${error}`);
-    }
-  }
-
-  @SubscribeMessage('reconnectToGame')
-  handleReconnect(client: Socket) {
-    try {
-      const game = this.roomService.handleReconnect(client.id);
-      if (game) {
-        if (this.gameLoops.has(game.gameId)) {
-          clearTimeout(this.gameLoops.get(game.gameId));
-          this.gameLoops.delete(game.gameId);
-        }
-
-        client.join(game.gameId);
-        this.server.to(game.gameId).emit('playerReconnected', {
-          playerId: client.id,
-          gameState: game,
-        });
-
-        const gameInterval = setInterval(() => {
-          const currentGame = this.roomService.getRoom(game.gameId);
-          if (!currentGame || !currentGame.isActive) {
-            clearInterval(gameInterval);
-            return;
-          }
-          this.gameService.updateGameState(game.gameId);
-          this.server.to(game.gameId).emit('gameState', currentGame);
-        }, SERVER_TICK_RATE);
-
-        this.gameLoops.set(game.gameId, gameInterval);
-      }
-    } catch (error) {
-      this.logger.error(`Error in reconnection: ${error}`);
     }
   }
 

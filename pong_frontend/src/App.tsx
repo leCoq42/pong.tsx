@@ -3,8 +3,8 @@ import { Routes, Route } from "react-router-dom";
 import { Suspense, lazy } from "react";
 import NavBar from "./components/NavBar";
 
-const PongLanding = lazy(() => import("./components/PongLanding"));
-const Pong = lazy(() => import("./components/Pong"));
+const PongLanding = lazy(() => import("./components/game/PongLanding"));
+const Pong = lazy(() => import("./components/game/Pong"));
 
 function App() {
   return (

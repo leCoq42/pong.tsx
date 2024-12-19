@@ -1,5 +1,5 @@
-import { useRef, useEffect } from 'react';
-import { GameRoom } from '../../../../shared/types';
+import { useRef, useEffect } from "react";
+import { GameRoom } from "../../../../shared/types";
 
 interface GameCanvasProps {
   width: number;
@@ -8,16 +8,21 @@ interface GameCanvasProps {
   onDraw: (context: CanvasRenderingContext2D, game: GameRoom) => void;
 }
 
-export const GameCanvas = ({ width, height, gameState, onDraw }: GameCanvasProps) => {
+const GameCanvas = ({
+  width,
+  height,
+  gameState,
+  onDraw,
+}: GameCanvasProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    
-    const context = canvas.getContext('2d');
+
+    const context = canvas.getContext("2d");
     if (!context) return;
-    
+
     onDraw(context, gameState);
   }, [gameState, onDraw]);
 
@@ -30,3 +35,5 @@ export const GameCanvas = ({ width, height, gameState, onDraw }: GameCanvasProps
     />
   );
 };
+
+export default GameCanvas;
