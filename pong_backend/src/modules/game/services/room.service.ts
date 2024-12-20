@@ -5,8 +5,8 @@ import { v4 as uuid } from 'uuid';
 
 @Injectable()
 export class RoomService {
-  private rooms: Map<string, GameRoom> = new Map();
-  private playerGameMap: Map<string, string> = new Map();
+  private rooms = new Map<string, GameRoom>();
+  public playerGameMap = new Map<string, string>();
   private readonly logger = new Logger(RoomService.name);
   private disconnectedPlayers: Map<
     string,
@@ -21,26 +21,22 @@ export class RoomService {
   ): string {
     const gameId = uuid();
 
-    this.playerGameMap.set(playerIds[0], gameId);
-    if (mode === 'remote-mp' && playerIds[1]) {
-      this.playerGameMap.set(playerIds[1], gameId);
-    }
+    playerIds.forEach((id) => {
+      this.playerGameMap.set(id, gameId);
+    });
 
-    const clients =
-      mode === 'singleplayer'
-        ? [{ id: playerIds[0] }, { id: 'bot' }]
-        : mode === 'local-mp'
-          ? [{ id: playerIds[0] }, { id: 'player2' }]
-          : [{ id: playerIds[0] }, { id: playerIds[1] }];
+    const clients = playerIds.map((id) => ({ id }));
 
     const gameRoom: GameRoom = {
       gameId,
       clients,
       mode,
-      isActive: true,
+      isActive: false,
       isFinished: false,
       gameState: initialGameState,
       gameConstants,
+      playersReady: new Set(),
+      matchAccepted: false,
     };
 
     this.rooms.set(gameId, gameRoom);
@@ -51,8 +47,11 @@ export class RoomService {
     return this.rooms.get(gameId);
   }
 
-  setRoom(gameId: string, room: GameRoom): void {
-    this.rooms.set(gameId, room);
+  setRoom(gameId: string, game: GameRoom): void {
+    this.rooms.set(gameId, game);
+    game.clients.forEach((client) => {
+      this.playerGameMap.set(client.id, gameId);
+    });
   }
 
   getRoomByPlayerId(playerId: string): string | undefined {

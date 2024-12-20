@@ -3,6 +3,10 @@ export interface Room {
   roomID: string;
 }
 
+export interface GameMode {
+  mode: "singleplayer" | "local-mp" | "remote-mp";
+}
+
 export enum ClientEvents {
   Ping = "client.ping",
 
@@ -29,13 +33,25 @@ export type ServerPayloads = {
 export interface GameRoom {
   gameId: string;
   clients: Client[];
-  mode: "singleplayer" | "local-mp" | "remote-mp";
+  mode: GameMode;
   isActive: boolean;
   isFinished: boolean;
   gameState: GameState;
   gameConstants: GameConstants;
   winner?: string;
-  isPaused?: boolean;
+  playersReady: Set<string>;
+  matchAccepted: boolean;
+}
+
+export interface MatchFoundPayload {
+  gameId: string;
+  opponent: string;
+  timeToAccept: number;
+}
+
+export interface MatchAcceptedPayload {
+  gameId: string;
+  playerId: string;
 }
 
 export interface Client {

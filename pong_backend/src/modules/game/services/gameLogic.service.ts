@@ -1,15 +1,15 @@
 import { Injectable } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter2 as EventEmitter2 } from '@nestjs/event-emitter';
 import { GameRoom, GameState, Ball } from '../../../../../shared/types';
 import { Logger } from '@nestjs/common';
 import { RoomService } from './room.service';
 
-const SERVER_TICK_RATE = 1000 / 120;
+const SERVER_TICK_RATE = 1000 / 60;
 
 @Injectable()
-export class GameService {
+export class GameLogicService {
   private gameLoops: Map<string, NodeJS.Timeout> = new Map();
-  private readonly logger = new Logger(GameService.name);
+  private readonly logger = new Logger(GameLogicService.name);
 
   private readonly DEFAULT_GAME_CONSTANTS = {
     PADDLE_HEIGHT: 100,
@@ -20,7 +20,7 @@ export class GameService {
     PADDLE_SPEED: 5,
     CANVAS_WIDTH: 800,
     CANVAS_HEIGHT: 600,
-    WIN_SCORE: 1,
+    WIN_SCORE: 2,
   };
 
   constructor(
@@ -43,7 +43,6 @@ export class GameService {
       initialGameState,
       this.DEFAULT_GAME_CONSTANTS,
     );
-    this.startGameLoop(gameId);
     return gameId;
   }
 
@@ -185,7 +184,7 @@ export class GameService {
   }
 
   private updateAIPosition(game: GameRoom): void {
-    const aiPlayerIdx = 1;
+    const aiPlayerIdx = 0;
     const ballY = game.gameState.ball.y;
     const paddleY = game.gameState.players[aiPlayerIdx].position;
     const paddleHeight = game.gameConstants.PADDLE_HEIGHT;

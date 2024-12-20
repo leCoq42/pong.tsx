@@ -31,7 +31,7 @@ export class RoomController {
   async joinQueue(@Body('playerId') playerId: string) {
     try {
       const position = await this.matchmakingService.joinQueue(playerId);
-      return { position, success: true };
+      return { data: { position, success: true } };
     } catch (error) {
       throw new HttpException(`Failed to join queue: ${error}`, 500);
     }
@@ -60,7 +60,8 @@ export class RoomController {
   @Get('/queue/status')
   async getQueueStatus(@Req() req: Request) {
     try {
-      const match = await this.matchmakingService.checkPlayerMatch(req.ip);
+      const playerId = req.query.playerId as string;
+      const match = await this.matchmakingService.checkPlayerMatch(playerId);
       if (match) {
         return { matched: true, gameId: match.gameId };
       }

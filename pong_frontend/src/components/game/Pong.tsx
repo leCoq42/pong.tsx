@@ -1,14 +1,14 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { io, Socket } from "socket.io-client";
-import { GameRoom } from "../../../../shared/types";
-import { roomApi } from "./services/rooms";
+import { Socket } from "socket.io-client";
+import { GameRoom, MatchFoundPayload } from "../../../../shared/types";
+import roomApi from "./services/rooms";
 import { createSocket } from "../../config/socket";
 import GameCanvas from "./GameCanvas";
 import GameControls from "./GameControls";
 import GameOver from "./GameOver";
 import GameElements from "./GameElements";
 import ScoreBoard from "./ScoreBoard";
-import PauseOverlay from "./PauseOverlay";
+import MatchAccept from "./MatchAccept";
 
 const FRAME_RATE = 1000 / 60;
 
@@ -33,7 +33,6 @@ const Pong: React.FC<PongProps> = (props) => {
   const [disconnectMessage, setDisconnectMessage] = useState<string | null>(
     null
   );
-  const [isPaused, setIsPaused] = useState(false);
   const [finalScore, setFinalScore] = useState<{
     player1: number;
     player2: number;
@@ -42,6 +41,9 @@ const Pong: React.FC<PongProps> = (props) => {
     player2: 0,
   });
   const [gameActive, setGameActive] = useState(false);
+  const [showMatch, setShowMatch] = useState(false);
+  const [matchTimeLeft, setMatchTimeLeft] = useState(10);
+  const [matchOpponent, setMatchOpponent] = useState("");
 
   const socketRef = useRef<Socket | null>(null);
   const animationFrameRef = useRef<number>();
@@ -53,25 +55,22 @@ const Pong: React.FC<PongProps> = (props) => {
     if (!socketRef.current) return;
 
     socketRef.current.on("connect", () => {
-      console.log("Connected to server");
+      console.log("Socket connected with ID:", socketRef.current?.id);
       connectedRef.current = true;
     });
 
     socketRef.current.on(
       "opponentDisconnected",
       (data: { playerId: string; gameState: GameRoom }) => {
-        if (data.gameState.isPaused) {
-          setIsPaused(true);
-          if (data.playerId === socketRef.current?.id) {
-            localStorage.setItem("disconnectedGameId", data.gameState.gameId);
-            setDisconnectMessage(
-              "You're disconnected. Click reconnect to rejoin the game."
-            );
-          } else {
-            setDisconnectMessage(
-              "Opponent disconnected. Waiting for reconnection..."
-            );
-          }
+        if (data.playerId === socketRef.current?.id) {
+          localStorage.setItem("disconnectedGameId", data.gameState.gameId);
+          setDisconnectMessage(
+            "You're disconnected. Click reconnect to rejoin the game."
+          );
+        } else {
+          setDisconnectMessage(
+            "Opponent disconnected. Waiting for reconnection..."
+          );
         }
         updateCanvas(data.gameState);
       }
@@ -87,6 +86,8 @@ const Pong: React.FC<PongProps> = (props) => {
         setCurrentGameState(data.game);
         lastUpdateTime.current = performance.now();
         localStorage.setItem("gameId", data.gameId);
+        setGameActive(true);
+        setIsMatchmaking(false);
       }
     );
 
@@ -111,33 +112,100 @@ const Pong: React.FC<PongProps> = (props) => {
       }
     );
 
-    socketRef.current.on("connect_error", (error) => {
-      console.error("Connection error:", error);
+    socketRef.current.on("matchFound", (data: MatchFoundPayload) => {
+      console.log("Match found:", data);
+      setShowMatch(true);
+      setMatchOpponent(data.opponent);
+      setMatchTimeLeft(data.timeToAccept);
+
+      const timer = setInterval(() => {
+        setMatchTimeLeft((prev) => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            handleDeclineMatch();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
     });
 
-    socketRef.current.on("connect_failed", () => {
-      console.error("Connection failed");
+    socketRef.current.on("matchAccepted", () => {
+      setShowMatch(false);
+    });
+
+    socketRef.current.on(
+      "joinAcceptedGame",
+      (data: { gameId: string; playerId: string }) => {
+        console.log("Joining accepted game:", data);
+        socketRef.current?.emit("joinGame", {
+          gameId: data.gameId,
+          playerId: data.playerId,
+        });
+      }
+    );
+
+    socketRef.current.on("matchDeclined", () => {
+      setShowMatch(false);
+      setIsMatchmaking(true);
     });
   }
+
+  const handleAcceptMatch = () => {
+    const gameId = localStorage.getItem("gameId");
+    if (!gameId || !socketRef.current) return;
+
+    socketRef.current.emit("acceptMatch", {
+      gameId,
+      playerId: socketRef.current.id,
+    });
+  };
+
+  const handleDeclineMatch = () => {
+    const gameId = localStorage.getItem("gameId");
+    if (!gameId || !socketRef.current) return;
+
+    socketRef.current.emit("declineMatch", {
+      gameId,
+      playerId: socketRef.current.id,
+    });
+    setShowMatch(false);
+    setIsMatchmaking(false);
+  };
 
   useEffect(() => {
     let pollInterval: NodeJS.Timeout;
 
     const pollMatchStatus = async () => {
       if (!isMatchmaking) return;
-
       try {
-        const { matched, gameId } = await roomApi.checkMatchStatus();
-        if (matched && gameId) {
+        const playerId = localStorage.getItem("currentPlayerId");
+        if (!playerId) {
+          console.warn("No player ID found");
+          setIsMatchmaking(false);
+          return;
+        }
+
+        const response = await roomApi.checkMatchStatus(playerId);
+
+        if (response.matched && response.gameId) {
+          const socket = createSocket();
+          socketRef.current = socket;
+
+          await new Promise<void>((resolve) => {
+            socket.on("connect", () => {
+              console.log("Socket connected, joining game:", response.gameId);
+              socket.emit("joinGame", {
+                gameId: response.gameId,
+                playerId,
+                socketId: socket.id,
+              });
+              resolve();
+            });
+          });
+          setupSocketListeners();
           setIsMatchmaking(false);
           setQueuePosition(null);
-
-          socketRef.current = createSocket();
-          setupSocketListeners();
-          socketRef.current.emit("joinGame", { gameId });
-
-          setGameStarted(true);
-          setGameActive(true);
         }
       } catch (error) {
         console.error("Error checking match status:", error);
@@ -145,6 +213,7 @@ const Pong: React.FC<PongProps> = (props) => {
     };
 
     if (isMatchmaking) {
+      pollMatchStatus();
       pollInterval = setInterval(pollMatchStatus, 1000);
     }
 
@@ -161,21 +230,18 @@ const Pong: React.FC<PongProps> = (props) => {
 
   const handleStart = async () => {
     try {
-      const { gameId, gameState } = await roomApi.createGame(props.mode);
-
-      if (!gameId || !gameState) {
-        return;
-      }
-
-      localStorage.setItem("gameId", gameId);
-
-      setPreviousGameState(null);
-      setCurrentGameState(gameState);
-
       socketRef.current = createSocket();
       setupSocketListeners();
 
-      socketRef.current.emit("joinGame", { gameId });
+      console.log("Starting game with socket ID:", socketRef.current?.id);
+
+      await new Promise<void>((resolve) => {
+        socketRef.current?.once("connect", () => {
+          console.log("Socket connected, emitting startGame");
+          socketRef.current?.emit("startGame", props.mode);
+          resolve();
+        });
+      });
 
       setGameStarted(true);
       setGameActive(true);
@@ -197,17 +263,56 @@ const Pong: React.FC<PongProps> = (props) => {
 
   const handleStartMatchmaking = async () => {
     try {
-      const { position } = await roomApi.joinQueue();
+      socketRef.current = createSocket();
+
+      await new Promise<void>((resolve, reject) => {
+        if (!socketRef.current) {
+          reject(new Error("Failed to create socket"));
+          return;
+        }
+
+        socketRef.current.on("connect", () => {
+          console.log("Socket connected:", socketRef.current?.id);
+          resolve();
+        });
+
+        socketRef.current.on("connect_error", (error) => {
+          console.error("Socket connection error:", error);
+          reject(error);
+        });
+      });
+      setupSocketListeners();
+
+      if (!socketRef.current?.id) {
+        throw new Error("Socket ID not available");
+      }
+
+      console.log("Joining queue with socket ID:", socketRef.current.id);
+      const response = await roomApi.joinQueue(socketRef.current.id);
+
+      if (!response || typeof response.position !== "number") {
+        throw new Error("Invalid queue response from server");
+      }
+
       setIsMatchmaking(true);
-      setQueuePosition(position);
+      setQueuePosition(response.position);
+      localStorage.setItem("currentPlayerId", socketRef.current.id);
     } catch (error) {
       console.error("Error starting matchmaking:", error);
+      setIsMatchmaking(false);
+      setQueuePosition(null);
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
     }
   };
 
   const handleCancelMatchmaking = async () => {
     try {
-      await roomApi.leaveQueue();
+      const playerId = localStorage.getItem("currentPlayerId");
+      if (!playerId) return;
+      await roomApi.leaveQueue(playerId);
       setIsMatchmaking(false);
       setQueuePosition(null);
     } catch (error) {
@@ -236,7 +341,10 @@ const Pong: React.FC<PongProps> = (props) => {
       setWinner(null);
       setFinalScore(null);
       handleStart();
-      socketRef.current?.emit("joinGame", { gameId: newGameId });
+      socketRef.current?.emit("joinGame", {
+        gameId: newGameId,
+        playerId: localStorage.getItem("currentPlayer"),
+      });
       localStorage.setItem("gameId", newGameId);
     } catch (error) {
       console.error("Error rematching:", error);
@@ -299,31 +407,24 @@ const Pong: React.FC<PongProps> = (props) => {
     if (!currentGameState || !gameActive || !socketRef.current?.connected)
       return;
 
-    const { PADDLE_HEIGHT, CANVAS_HEIGHT } = currentGameState.gameConstants;
-
     if (props.mode === "local-mp") {
-      if (
-        keyRef.current["w"] &&
-        currentGameState.gameState.players[0].position > 0
-      ) {
-        console.log("Sending up movement");
+      if (keyRef.current["w"]) {
         socketRef.current?.emit("updatePosition", { dir: -1, player: 2 });
       }
-      if (
-        keyRef.current["s"] &&
-        currentGameState.gameState.players[0].position <
-          CANVAS_HEIGHT - PADDLE_HEIGHT
-      ) {
-        console.log("Sending down movement");
+      if (keyRef.current["s"]) {
         socketRef.current?.emit("updatePosition", { dir: 1, player: 2 });
+      }
+      if (keyRef.current["ArrowUp"]) {
+        socketRef.current?.emit("updatePosition", { dir: -1, player: 1 });
+      }
+      if (keyRef.current["ArrowDown"]) {
+        socketRef.current?.emit("updatePosition", { dir: 1, player: 1 });
       }
     } else {
       if (keyRef.current["ArrowUp"]) {
-        console.log("Sending up movement");
         socketRef.current?.emit("updatePosition", { dir: -1 });
       }
       if (keyRef.current["ArrowDown"]) {
-        console.log("Sending down movement");
         socketRef.current?.emit("updatePosition", { dir: 1 });
       }
     }
@@ -389,7 +490,13 @@ const Pong: React.FC<PongProps> = (props) => {
       if (animationFrameRef.current)
         cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [currentGameState, previousGameState, gameStarted, updateCanvas]);
+  }, [
+    currentGameState,
+    previousGameState,
+    gameStarted,
+    updateCanvas,
+    gameActive,
+  ]);
 
   useEffect(() => {
     if (gameStarted) {
@@ -405,6 +512,13 @@ const Pong: React.FC<PongProps> = (props) => {
 
   return (
     <div className="flex flex-col items-center gap-4">
+      <MatchAccept
+        isOpen={showMatch}
+        opponent={matchOpponent}
+        timeLeft={matchTimeLeft}
+        onAccept={handleAcceptMatch}
+        onDecline={handleDeclineMatch}
+      />
       <div className="text-lg font-bold">Pong</div>
       <div className="text-sm mb-2">
         {props.mode === "local-mp" &&
@@ -439,10 +553,6 @@ const Pong: React.FC<PongProps> = (props) => {
               canvasWidth={props.gameWidth}
             />
           )}
-          <PauseOverlay
-            isPaused={isPaused}
-            message={disconnectMessage || "Game Paused"}
-          />
         </div>
       )}
 

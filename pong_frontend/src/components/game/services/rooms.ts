@@ -1,77 +1,110 @@
-import { GameRoom } from "../../../../../shared/types";
+import { GameRoom, GameMode } from "../../../../../shared/types";
+import axios from "axios";
 
-const API_BASE_URL = "http://localhost:3000/api/game";
+// const API_BASE_URL = "http://localhost:3000/api/game";
+
+interface ApiResponse<T> {
+  data: T;
+  success: boolean;
+  error?: string;
+}
 
 interface GameResponse {
   gameId: string;
   gameState: GameRoom;
 }
 
-export const roomApi = {
-  async createGame(
-    mode: "singleplayer" | "local-mp" | "remote-mp"
-  ): Promise<GameResponse> {
-    const response = await fetch(`${API_BASE_URL}/start`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      credentials: "include",
-      body: JSON.stringify({ mode }),
-    });
+interface QueueResponse {
+  position: number;
+  success: boolean;
+}
 
-    if (!response.ok) {
-      throw new Error(`Failed to create game: ${response.statusText}`);
+interface MatchStatusResponse {
+  matched: boolean;
+  gameId?: string;
+}
+
+interface RematchResponse {
+  newGameId: string;
+}
+
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_URL,
+  timeout: 5000,
+  headers: {
+    "Content-Type": "application/json",
+  },
+});
+
+const handleApiError = (error: any): never => {
+  if (axios.isAxiosError(error)) {
+    console.error('API Error:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.message || 'API request failed');
+  }
+  throw error;
+};
+
+const roomApi = {
+  async createGame(mode: GameMode): Promise<GameResponse> {
+    try {
+      const { data } = await api.post<ApiResponse<GameResponse>>(
+        "/api/game/start",
+        { mode }
+      );
+      return data;
+    } catch (error) {
+      handleApiError(error);
     }
-
-    return response.json();
   },
 
-  async joinQueue(): Promise<{ position: number }> {
-    const response = await fetch(`${API_BASE_URL}/queue/join`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      credentials: "include",
-    });
-    return response.json();
+  async joinQueue(playerId: string): Promise<QueueResponse> {
+    try {
+      const { data } = await api.post<ApiResponse<QueueResponse>>(
+        "/api/game/queue/join",
+        { playerId }
+      );
+      return data.data;
+    } catch (error) {
+      handleApiError(error);
+    }
   },
 
-  async checkMatchStatus(): Promise<{ matched: boolean; gameId?: string }> {
-    const response = await fetch(`${API_BASE_URL}/queue/status`, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-      },
-      credentials: "include",
-    });
-    return response.json();
+  async leaveQueue(playerId: string): Promise<void> {
+    try {
+      await api.post<ApiResponse<void>>("/api/game/queue/leave", { playerId });
+    } catch (error) {
+      handleApiError(error);
+    }
   },
 
-  async leaveQueue(): Promise<void> {
-    await fetch(`${API_BASE_URL}/queue/leave`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      credentials: "include",
-    });
+  async checkMatchStatus(playerId: string): Promise<MatchStatusResponse> {
+    try {
+      const { data } = await api.get<ApiResponse<MatchStatusResponse>>(
+        `/api/game/queue/status?playerId=${playerId}`
+      );
+      if (!data || !data.data) {
+        return { matched: false };
+      }
+      return {
+        matched: data.data.matched,
+        gameId: data.data.gameId
+      };
+    } catch (error) {
+      handleApiError(error);
+    }
   },
 
-  async rematch(gameId: string): Promise<{ newGameId: string }> {
-    const response = await fetch(`${API_BASE_URL}/rematch`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      credentials: "include",
-      body: JSON.stringify({ gameId }),
-    });
-    return response.json();
+  async rematch(gameId: string): Promise<RematchResponse> {
+    try {
+      const { data } = await api.post<ApiResponse<RematchResponse>>(
+        "/api/game/rematch",
+        { gameId }
+      );
+      return data.data;
+    } catch (error) {
+      handleApiError(error);
+    }
   },
 };
+
+export default roomApi;

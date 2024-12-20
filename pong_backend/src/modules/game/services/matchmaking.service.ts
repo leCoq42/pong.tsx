@@ -1,13 +1,15 @@
-import { Injectable, Logger } from '@nestjs/common';
-// import { GameRoom } from '../../../../../shared/types';
 import { RoomService } from './room.service';
-import { GameService } from './gameLogic.service';
+import { GameLogicService } from './gameLogic.service';
 import { GameRoom } from '../../../../../shared/types';
+import { GameGateway } from '../gateways/game.gateway';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 
 @Injectable()
 export class MatchmakingService {
   private readonly logger = new Logger(MatchmakingService.name);
+
   private matchmakingQueue: string[] = [];
+  private queuedPlayers: Set<string> = new Set();
   private matchedPlayers = new Map<
     string,
     { gameId: string; timestamp: number }
@@ -16,27 +18,32 @@ export class MatchmakingService {
 
   constructor(
     private readonly roomService: RoomService,
-    private readonly gameService: GameService,
+    private readonly gameService: GameLogicService,
+    @Inject(forwardRef(() => GameGateway))
+    private readonly gameGateway: GameGateway,
   ) {
     this.queueCheckInterval = setInterval(() => this.processQueue(), 1000);
   }
 
   async joinQueue(playerId: string): Promise<number> {
-    if (!this.canJoinQueue(playerId)) {
-      throw new Error('Player is already in queue');
+    this.logger.log(`Attempting to join queue: ${playerId}`);
+
+    if (this.queuedPlayers.has(playerId)) {
+      throw new Error(`Player ${playerId} is already in queue`);
     }
+
+    this.queuedPlayers.add(playerId);
     this.matchmakingQueue.push(playerId);
 
     if (this.matchmakingQueue.length >= 2) {
-      const player1 = this.matchmakingQueue.shift()!;
-      const player2 = this.matchmakingQueue.shift()!;
-      const gameId = await this.createGame('remote-mp', [player1, player2]);
+      await this.processQueue();
     }
 
-    return this.getQueuePosition(playerId);
+    return this.matchmakingQueue.indexOf(playerId);
   }
 
   async leaveQueue(playerId: string): Promise<void> {
+    this.queuedPlayers.delete(playerId);
     this.matchmakingQueue = this.matchmakingQueue.filter(
       (id) => id !== playerId,
     );
@@ -72,16 +79,6 @@ export class MatchmakingService {
     );
   }
 
-  private canJoinQueue(playerId: string): boolean {
-    const inQueue = this.matchmakingQueue.includes(playerId);
-    const inGame = this.roomService.isPlayerInRoom(playerId);
-    return !inQueue && !inGame;
-  }
-
-  private getQueuePosition(playerId: string): number {
-    return this.matchmakingQueue.indexOf(playerId) + 1;
-  }
-
   async checkPlayerMatch(playerId: string): Promise<{ gameId: string } | null> {
     const match = this.matchedPlayers.get(playerId);
     if (match) {
@@ -92,23 +89,41 @@ export class MatchmakingService {
   }
 
   private async processQueue(): Promise<void> {
-    while (this.matchmakingQueue.length >= 2) {
-      const player1 = this.matchmakingQueue.shift()!;
-      const player2 = this.matchmakingQueue.shift()!;
+    if (this.matchmakingQueue.length < 2) return;
 
-      try {
-        const gameId = await this.createGame('remote-mp', [player1, player2]);
+    const player1Id = this.matchmakingQueue.shift()!;
+    const player2Id = this.matchmakingQueue.shift()!;
 
+    try {
+      const gameId = await this.createGame('remote-mp', [player1Id, player2Id]);
+      const game = this.roomService.getRoom(gameId);
+
+      if (game) {
         const matchInfo = { gameId, timestamp: Date.now() };
-        this.matchedPlayers.set(player1, matchInfo);
-        this.matchedPlayers.set(player2, matchInfo);
+        this.matchedPlayers.set(player1Id, matchInfo);
+        this.matchedPlayers.set(player2Id, matchInfo);
 
-        this.logger.log(`Matched players ${player1} and ${player2}`);
-      } catch (error) {
-        this.matchmakingQueue.unshift(player2);
-        this.matchmakingQueue.unshift(player1);
-        this.logger.error(`Failed to create match: ${error}`);
+        this.queuedPlayers.delete(player1Id);
+        this.queuedPlayers.delete(player2Id);
+
+        this.gameGateway.server.to(player1Id).emit('matchFound', {
+          gameId,
+          opponent: player2Id,
+          timeToAccept: 30,
+        });
+
+        this.gameGateway.server.to(player2Id).emit('matchFound', {
+          gameId,
+          opponent: player1Id,
+          timeToAccept: 30,
+        });
+
+        this.logger.log(`Matched players ${player1Id} and ${player2Id}`);
       }
+    } catch (error) {
+      this.logger.error(`Failed to create match: ${error}`);
+      this.matchmakingQueue.unshift(player2Id);
+      this.matchmakingQueue.unshift(player1Id);
     }
   }
 

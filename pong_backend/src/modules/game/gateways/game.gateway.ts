@@ -1,11 +1,12 @@
 import {
+  OnGatewayConnection,
   OnGatewayDisconnect,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { GameService } from '../services/gameLogic.service';
+import { GameLogicService as GameLogicService } from '../services/gameLogic.service';
 import { RoomService } from '../services/room.service';
 import { GameRoom } from '../../../../../shared/types';
 import { Logger } from '@nestjs/common';
@@ -19,14 +20,13 @@ const SERVER_TICK_RATE = 1000 / 60;
   },
   namespace: 'game',
 })
-export class GameGateway implements OnGatewayDisconnect {
+export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
   private readonly logger = new Logger(GameGateway.name);
-  private matchmakingQueue: Socket[] = [];
   private gameLoops: Map<string, NodeJS.Timeout> = new Map();
 
   constructor(
-    private gameService: GameService,
+    private gameService: GameLogicService,
     private roomService: RoomService,
   ) {
     this.gameService.onGameEnd((data) => {
@@ -40,15 +40,11 @@ export class GameGateway implements OnGatewayDisconnect {
 
   handleConnection(client: Socket) {
     this.logger.log('Client connected: ' + client.id);
-
-    const rooms = [...client.rooms];
-    this.logger.log(`Client ${client.id} is in rooms:`, rooms);
   }
 
   handleDisconnect(client: Socket) {
     try {
       this.logger.log(`Opponent disconnected: ${client.id}`);
-      this.removeFromQueue(client);
       const gameId = this.roomService.getRoomByPlayerId(client.id);
       if (gameId) {
         const updatedGame = this.roomService.handlePlayerDisconnect(
@@ -74,29 +70,39 @@ export class GameGateway implements OnGatewayDisconnect {
   }
 
   @SubscribeMessage('joinGame')
-  handleJoinGame(client: Socket, data: { gameId: string }) {
+  async handleJoinGame(
+    client: Socket,
+    data: { gameId: string; playerId: string },
+  ) {
     try {
       const game = this.roomService.getRoom(data.gameId);
-      if (!game) {
-        throw new Error('Game not found');
-      }
+      if (!game) return;
 
-      client.join(data.gameId);
+      await client.join(data.gameId);
+      this.roomService.playerGameMap.set(client.id, data.gameId);
 
-      if (game.mode === 'singleplayer' || game.mode === 'local-mp') {
+      const room = await this.server.in(data.gameId).fetchSockets();
+      const roomSize = room.length;
+
+      this.logger.log(
+        `Player ${client.id} joined game ${data.gameId}. Room size: ${roomSize}`,
+      );
+
+      if (game.matchAccepted && roomSize === 2) {
+        this.server.to(data.gameId).emit('gameStarted', {
+          gameId: data.gameId,
+          game: game,
+          mode: game.mode,
+        });
         this.startGameLoop(data.gameId);
-      } else if (game.mode === 'remote-mp') {
-        const room = this.server.sockets.adapter.rooms.get(data.gameId);
-        if (room?.size === 2) {
-          this.startGameLoop(data.gameId);
-        }
       }
     } catch (error) {
       this.logger.error(`Error joining game: ${error}`);
+      client.emit('error', { message: 'Failed to join game' });
     }
   }
 
-  private startGameLoop(gameId: string) {
+  public startGameLoop(gameId: string) {
     const gameInterval = setInterval(() => {
       const currentGame = this.roomService.getRoom(gameId);
       if (!currentGame || !currentGame.isActive) {
@@ -115,32 +121,25 @@ export class GameGateway implements OnGatewayDisconnect {
     mode: 'local-mp' | 'remote-mp' | 'singleplayer',
   ) {
     try {
-      this.logger.log(`Player ${client.id} joined queue for mode: ${mode}`);
+      this.logger.log(`Player ${client.id} ready to start game: ${mode}`);
 
-      if (mode === 'singleplayer') {
-        this.handleSingleplayer(client);
-      } else if (mode === 'local-mp') {
-        this.handleLocalMultiplayer(client);
-      } else {
-        this.matchmakingQueue.push(client);
-        if (this.matchmakingQueue.length >= 2) {
-          const player1 = this.matchmakingQueue.shift();
-          const player2 = this.matchmakingQueue.shift();
-          this.handleRemoteMultiplayer(player1, player2, mode);
-        }
+      const gameId = this.gameService.createGame([client.id], mode);
+      client.join(gameId);
+
+      this.roomService.playerGameMap.set(client.id, gameId);
+
+      const game = this.roomService.getRoom(gameId);
+      if (game) {
+        game.isActive = true;
+        this.roomService.setRoom(gameId, game);
+        client.emit('gameStarted', { gameId, mode, game });
+        this.startGameLoop(gameId);
       }
+
+      this.startGameLoop(gameId);
     } catch (error) {
       this.logger.error(`Error joining queue: ${error}`);
     }
-  }
-
-  @SubscribeMessage('rematch')
-  handleRematch(
-    client: Socket,
-    mode: 'local-mp' | 'remote-mp' | 'singleplayer',
-  ) {
-    this.logger.log(`Player ${client.id} requested rematch for mode: ${mode}`);
-    this.handleStartGame(client, mode);
   }
 
   @SubscribeMessage('updatePosition')
@@ -151,42 +150,36 @@ export class GameGateway implements OnGatewayDisconnect {
     try {
       const gameId = this.roomService.getRoomByPlayerId(client.id);
       if (!gameId) {
-        console.log('No game found for player:', client.id);
+        this.logger.error(`Game not found for player ${client.id}`);
         return;
       }
 
       const game = this.roomService.getRoom(gameId);
-      if (!game) {
-        console.log('Game not found:', gameId);
-        return;
-      }
+      if (!game) return;
 
       let playerIdx: number;
-
       if (game.mode === 'local-mp') {
-        playerIdx = payload.player === 2 ? 1 : 0;
+        playerIdx = payload.player === 1 ? 1 : 0;
+      } else if (game.mode === 'singleplayer') {
+        playerIdx = 1;
       } else {
         playerIdx = game.clients.findIndex((p) => p.id === client.id);
       }
-
       if (playerIdx === -1) {
-        console.log('Player index not found:', client.id);
+        this.logger.error(`Player ${client.id} not found in game ${gameId}`);
         return;
       }
 
       const currentPosition = game.gameState.players[playerIdx].position;
-      const newPosition =
-        currentPosition + game.gameConstants.PADDLE_SPEED * payload.dir;
       const maxPosition =
         game.gameConstants.CANVAS_HEIGHT - game.gameConstants.PADDLE_HEIGHT;
+      const newPosition =
+        currentPosition + game.gameConstants.PADDLE_SPEED * payload.dir;
       const finalPosition = Math.max(0, Math.min(newPosition, maxPosition));
 
       game.gameState.players[playerIdx].position = finalPosition;
       this.roomService.setRoom(gameId, game);
 
-      console.log(
-        `Player ${playerIdx} moved from ${currentPosition} to ${finalPosition}`,
-      );
       this.server.to(gameId).emit('gameState', game);
     } catch (error) {
       this.logger.error(`Error updating position: ${error}`);
@@ -312,47 +305,5 @@ export class GameGateway implements OnGatewayDisconnect {
     });
 
     this.logger.log(`Emitted gameOver event to room ${gameId}`);
-  }
-
-  @SubscribeMessage('joinMatchmaking')
-  handleJoinMatchmaking(client: Socket) {
-    try {
-      this.matchmakingQueue.push(client);
-      if (this.matchmakingQueue.length >= 2) {
-        const player1 = this.matchmakingQueue.shift();
-        const player2 = this.matchmakingQueue.shift();
-        this.handleRemoteMultiplayer(player1, player2, 'remote-mp');
-
-        this.updateMatchmakingQueue();
-      }
-    } catch (error) {
-      this.logger.error(`Error with matchmaking: ${error}`);
-      client.emit('matchmakingError', {
-        message: 'Failed to join matchmaking',
-      });
-    }
-  }
-
-  private updateMatchmakingQueue() {
-    this.matchmakingQueue.forEach((client, idx) => {
-      client.emit('matchmakingUpdate', {
-        position: idx + 1,
-        length: this.matchmakingQueue.length,
-        status: 'waiting',
-      });
-    });
-  }
-
-  @SubscribeMessage('leaveMatchmaking')
-  handleLeaveMatchmaking(client: Socket) {
-    this.removeFromQueue(client);
-    client.emit('matchmakingStatus', { status: 'left' });
-    this.updateMatchmakingQueue();
-  }
-
-  private removeFromQueue(client: Socket) {
-    this.matchmakingQueue = this.matchmakingQueue.filter(
-      (c) => c.id !== client.id,
-    );
   }
 }
