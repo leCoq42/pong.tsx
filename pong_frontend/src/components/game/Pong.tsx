@@ -63,7 +63,7 @@ const Pong: React.FC<PongProps> = (props) => {
       "opponentDisconnected",
       (data: { playerId: string; gameState: GameRoom }) => {
         if (data.playerId === socketRef.current?.id) {
-          localStorage.setItem("disconnectedGameId", data.gameState.gameId);
+          localStorage.setItem("disconnectedGameId", data.gameState.roomId);
           setDisconnectMessage(
             "You're disconnected. Click reconnect to rejoin the game."
           );

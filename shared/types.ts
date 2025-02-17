@@ -1,11 +1,4 @@
-export interface Room {
-  players: Player[];
-  roomID: string;
-}
-
-export interface GameMode {
-  mode: "singleplayer" | "local-mp" | "remote-mp";
-}
+export type GameMode = "singleplayer" | "local-mp" | "remote-mp";
 
 export enum ClientEvents {
   Ping = "client.ping",
@@ -41,6 +34,7 @@ export interface GameRoom {
   winner?: string;
   playersReady: Set<string>;
   matchAccepted: boolean;
+  isPaused?: boolean;
 }
 
 export interface MatchFoundPayload {

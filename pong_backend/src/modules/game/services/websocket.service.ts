@@ -1,6 +1,6 @@
 import { Socket } from 'socket.io-client';
-import { createSocket } from '../config/socket';
-import { GameRoom, MatchFoundPayload } from '../../../shared/types';
+import { createSocket } from '../../../config/socket';
+import { GameRoom, MatchFoundPayload } from '../../../../../shared/types';
 
 class GameWebSocketService {
   private socket: Socket | null = null;
@@ -28,6 +28,25 @@ class GameWebSocketService {
         reject(error);
       }
     });
+  }
+
+  private handleReconnect(): void {
+    if (this.reconnectAttempts < this.MAX_RECONNECT_ATTEMPTS) {
+      this.reconnectAttempts++;
+      setTimeout(() => this.connect(), 1000);
+    }
+  }
+
+  public on(event: string, callback: (...args: any[]) => void): void {
+    if (!this.eventHandlers.has(event)) {
+      this.eventHandlers.set(event, []);
+    }
+    this.eventHandlers.get(event)?.push(callback);
+    this.socket?.on(event, callback);
+  }
+
+  public emit(event: string, ...args: any[]): void {
+    this.socket?.emit(event, ...args);
   }
 
   private setupDefaultListeners(): void {
